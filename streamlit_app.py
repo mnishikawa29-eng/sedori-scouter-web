@@ -1,6 +1,6 @@
 """
-せどり利益スカウター - Streamlit版 v2.1
-中古品フィルター搭載 + 利益ランキング表示
+せどり利益スカウター - Streamlit版 v2.2
+中古品フィルター + 販売店URL搭載
 """
 
 import streamlit as st
@@ -112,7 +112,7 @@ DEMO_BUYBACK_DB = {
     "4548736182738": {"price": 166000, "store": "ブックオフ"},
 }
 
-# 中古品判定キーワード（楽天・Yahoo!共通）
+# 中古品判定キーワード
 USED_KEYWORDS = [
     "中古", "USED", "used", "Used", "リユース", "再生品",
     "整備済", "アウトレット", "訳あり", "傷あり", "箱なし"
@@ -123,12 +123,26 @@ USED_KEYWORDS = [
 # ========================
 DEFAULT_CONFIG = {
     "min_profit_rate": 5.0,
-    "exclude_used": True,  # デフォルトで中古品除外ON
+    "exclude_used": True,
     "rakuten_point_rate": 15.0,
     "yahoo_point_rate": 20.0,
     "point_site_rate_rakuten": 1.0,
     "point_site_rate_yahoo": 1.2,
 }
+
+# ========================
+# URL生成関数
+# ========================
+def generate_search_url(jan_code: str, site: str) -> str:
+    """JANコードから各ECサイトの検索URLを生成"""
+    if site == "楽天":
+        return f"https://search.rakuten.co.jp/search/mall/{jan_code}/"
+    elif site == "Yahoo!":
+        return f"https://shopping.yahoo.co.jp/search?p={jan_code}"
+    elif site == "Amazon":
+        return f"https://www.amazon.co.jp/s?k={jan_code}"
+    else:
+        return ""
 
 # ========================
 # 中古品判定関数
@@ -163,33 +177,38 @@ def calculate_profit(jan_code, display_price, ec_point_rate, point_site_rate):
     }
 
 # ========================
-# ランキング生成（デモ用にダミー商品名を追加）
+# ランキング生成
 # ========================
 def create_ranking_df(config, exclude_used=True):
     display_price = 48000
     ec_rate = config["yahoo_point_rate"]
     ps_rate = config["point_site_rate_yahoo"]
     
-    # デモ用商品名リスト（一部を中古品として設定）
+    # デモ用商品名リスト
     demo_titles = [
         "Canon EOS R5 ボディ 新品未開封",
-        "Sony α7 IV【中古・美品】",  # 中古
+        "Sony α7 IV【中古・美品】",
         "Nikon Z9 ミラーレス一眼カメラ",
         "Panasonic LUMIX S5II 新品",
-        "FUJIFILM X-T5【アウトレット】",  # 中古扱い
+        "FUJIFILM X-T5【アウトレット】",
         "Olympus OM-1 新品未使用",
     ]
     
     ranking_data = []
     for idx, (jan_code, info) in enumerate(DEMO_BUYBACK_DB.items()):
-        # デモ用商品名を割り当て（ループで使いまわし）
         demo_title = demo_titles[idx % len(demo_titles)]
         
-        # 中古品フィルターが有効な場合
+        # 中古品フィルター
         if exclude_used and is_used_item(demo_title):
             continue
         
         result = calculate_profit(jan_code, display_price, ec_rate, ps_rate)
+        
+        # URL生成
+        yahoo_url = generate_search_url(jan_code, "Yahoo!")
+        rakuten_url = generate_search_url(jan_code, "楽天")
+        amazon_url = generate_search_url(jan_code, "Amazon")
+        
         ranking_data.append({
             "JAN": jan_code,
             "商品名": demo_title,
@@ -198,7 +217,10 @@ def create_ranking_df(config, exclude_used=True):
             "表示価格": display_price,
             "実質価格": int(result["effective_price"]),
             "利益額": int(result["profit_amount"]),
-            "利益率(%)": round(result["profit_rate"], 2)
+            "利益率(%)": round(result["profit_rate"], 2),
+            "Yahoo!": yahoo_url,
+            "楽天": rakuten_url,
+            "Amazon": amazon_url,
         })
     
     df = pd.DataFrame(ranking_data)
@@ -226,13 +248,12 @@ st.set_page_config(
 )
 
 st.title("🔍 せどり利益スカウター - 利益ランキング")
-st.caption("v2.1 中古品フィルター搭載版（100商品データ）| 最終更新: 2026-03-20")
+st.caption("v2.2 販売店URL搭載版（100商品データ）| 最終更新: 2026-03-20")
 
 # サイドバー設定
 st.sidebar.header("⚙️ 設定")
 config = DEFAULT_CONFIG.copy()
 
-# 🆕 中古品フィルター（最上部に配置）
 exclude_used = st.sidebar.checkbox(
     "🔒 中古品を除外",
     value=DEFAULT_CONFIG["exclude_used"],
@@ -258,7 +279,6 @@ config["point_site_rate_yahoo"] = st.sidebar.slider(
 # メイン画面
 st.header("📊 Yahoo!ショッピング 利益率ランキング")
 
-# 中古品フィルター状態を表示
 filter_status = "🔒 新品のみ" if exclude_used else "📦 新品 + 中古"
 st.info(f"**現在のフィルター設定**: {filter_status}")
 
@@ -290,17 +310,16 @@ with col_stat2:
 with col_stat3:
     st.metric("平均利益率", f"{df['利益率(%)'].mean():.2f}%")
 
-# テーブル表示
-st.dataframe(
-    df_filtered.style.format({
-        "買取価格": "¥{:,.0f}",
-        "表示価格": "¥{:,.0f}",
-        "実質価格": "¥{:,.0f}",
-        "利益額": "¥{:,.0f}",
-        "利益率(%)": lambda x: format_profit_rate(x)
-    }),
-    use_container_width=True,
-    height=600
+# テーブル表示用にURLをリンク化
+df_display = df_filtered.copy()
+df_display["Yahoo!"] = df_display["Yahoo!"].apply(lambda x: f'<a href="{x}" target="_blank">🔗 検索</a>')
+df_display["楽天"] = df_display["楽天"].apply(lambda x: f'<a href="{x}" target="_blank">🔗 検索</a>')
+df_display["Amazon"] = df_display["Amazon"].apply(lambda x: f'<a href="{x}" target="_blank">🔗 検索</a>')
+
+# HTML形式で表示
+st.markdown(
+    df_display.to_html(escape=False, index=True),
+    unsafe_allow_html=True
 )
 
 # ダウンロードボタン
@@ -317,6 +336,7 @@ st.markdown("---")
 st.info("""
 ⚠️ **注意事項**  
 - これはデモ版です（100件のサンプルデータ）
+- 🔗 各ECサイトの「検索」リンクをクリックでJAN検索ページが開きます
 - 中古品フィルターは商品名のキーワード判定で動作します
 - 実際の価格・在庫は変動します
 - 仕入れ前に必ず最新情報を確認してください
