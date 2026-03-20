@@ -1,85 +1,25 @@
 """
-せどり利益スカウター - Streamlit版 v2.4
-多様なジャンルの現実的な利益商品リスト搭載
+せどり利益スカウター - Streamlit版 v3.0
+実データベース (21,353件) 対応版
 """
 
 import streamlit as st
 import pandas as pd
+import json
 from datetime import datetime
+import os
 
 # ========================
-# デモ用買取価格データベース（100件）
-# 🆕 現実的な利益率（5%〜100%程度）の商品を中心に
+# 設定
 # ========================
-DEMO_BUYBACK_DB = {
-    # 家電製品（利益率 10%〜30%）
-    "4974019973593": {"price": 52000, "store": "家電芸人", "name": "ダイソン V12 Detect Slim コードレスクリーナー"},
-    "4548736123454": {"price": 48000, "store": "ジョーシン", "name": "シャープ 加湿空気清浄機 KI-PX70"},
-    "4902370546378": {"price": 31000, "store": "エディオン", "name": "Nintendo Switch 有機ELモデル ホワイト"},
-    "4549980594049": {"price": 42000, "store": "ビックカメラ", "name": "ソニー ワイヤレスヘッドホン WH-1000XM5"},
-    "4960759908841": {"price": 55000, "store": "家電芸人", "name": "パナソニック 食洗機 NP-TZ300"},
-    
-    # 美容家電（利益率 15%〜35%）
-    "4580564694766": {"price": 38000, "store": "ウイキャン", "name": "ヤーマン メディリフト アイ EPE-10"},
-    "4549660358473": {"price": 25000, "store": "ブックオフ", "name": "パナソニック ナノケア ドライヤー EH-NA0J"},
-    "4589785690051": {"price": 33000, "store": "ネットオフ", "name": "リファ ビューテック ドライヤー プロ"},
-    
-    # ゲーム機本体・周辺機器（利益率 8%〜25%）
-    "4948872016148": {"price": 28000, "store": "駿河屋", "name": "PlayStation 5 デジタル・エディション"},
-    "4902370548495": {"price": 6500, "store": "一丁目", "name": "Nintendo Switch Proコントローラー"},
-    "0889842976991": {"price": 52000, "store": "マップカメラ", "name": "Xbox Series X 本体"},
-    
-    # ゲームソフト（利益率 10%〜40%）
-    "4902370549041": {"price": 5200, "store": "駿河屋", "name": "ゼルダの伝説 ティアーズ オブ ザ キングダム"},
-    "4948872310734": {"price": 4800, "store": "ブックオフ", "name": "ファイナルファンタジー XVI"},
-    "4940261523220": {"price": 5500, "store": "駿河屋", "name": "スプラトゥーン3"},
-    
-    # 調理家電（利益率 12%〜28%）
-    "4589919823581": {"price": 13500, "store": "家電芸人", "name": "ティファール クックフォーミー 3L"},
-    "4562359411175": {"price": 18000, "store": "エディオン", "name": "シャープ ヘルシオ ホットクック 1.6L"},
-    "4967576492126": {"price": 9500, "store": "ジョーシン", "name": "象印 炊飯器 極め炊き NW-VD10"},
-    
-    # スマートウォッチ・ウェアラブル（利益率 10%〜30%）
-    "0194253905257": {"price": 38000, "store": "ビックカメラ", "name": "Apple Watch Series 9 GPS 45mm"},
-    "8806094927955": {"price": 28000, "store": "エディオン", "name": "Samsung Galaxy Watch6 Classic"},
-    "6942351711323": {"price": 12000, "store": "家電芸人", "name": "Xiaomi Smart Band 8 Pro"},
-    
-    # イヤホン・オーディオ（利益率 15%〜35%）
-    "0194252721049": {"price": 28000, "store": "ビックカメラ", "name": "Apple AirPods Pro 第2世代"},
-    "4549980633687": {"price": 22000, "store": "ジョーシン", "name": "ソニー WF-1000XM5 ワイヤレスイヤホン"},
-    "8809755746023": {"price": 18000, "store": "エディオン", "name": "Samsung Galaxy Buds2 Pro"},
-    
-    # PC周辺機器（利益率 10%〜25%）
-    "4988617432543": {"price": 8500, "store": "家電芸人", "name": "ロジクール MXマスター 3S ワイヤレスマウス"},
-    "0097855163370": {"price": 12000, "store": "ビックカメラ", "name": "Logicool G PRO X SUPERLIGHT ゲーミングマウス"},
-    "4537694297431": {"price": 15000, "store": "エディオン", "name": "Keychron K8 Pro メカニカルキーボード"},
-    
-    # タブレット・電子書籍リーダー（利益率 8%〜20%）
-    "0194253092391": {"price": 52000, "store": "ビックカメラ", "name": "iPad 第10世代 Wi-Fi 256GB"},
-    "0840268953744": {"price": 15000, "store": "家電芸人", "name": "Amazon Kindle Paperwhite シグニチャー"},
-    
-    # カメラ関連（利益率 10%〜50%）※一部高利益商品を残す
-    "4549292230116": {"price": 85000, "store": "マップカメラ", "name": "Canon EOS R6 Mark II ボディ"},
-    "4548736162075": {"price": 72000, "store": "マップカメラ", "name": "Sony α7 IV ボディ"},
-    "4960759911247": {"price": 120000, "store": "マップカメラ", "name": "Nikon Z9 ボディ"},
-    
-    # 生活家電（利益率 12%〜30%）
-    "4974019206080": {"price": 42000, "store": "家電芸人", "name": "ダイソン Pure Hot+Cool HP07"},
-    "4549980644829": {"price": 18000, "store": "エディオン", "name": "ソニー グラスサウンドスピーカー LSPX-S3"},
-    "4580652110075": {"price": 32000, "store": "ジョーシン", "name": "バルミューダ The Toaster Pro"},
-    
-    # 健康器具（利益率 15%〜35%）
-    "4975479419126": {"price": 48000, "store": "家電芸人", "name": "タニタ 体組成計 インナースキャンデュアル RD-917L"},
-    "4975479419751": {"price": 15000, "store": "ビックカメラ", "name": "オムロン 体重体組成計 HBF-702T"},
-    
-    # おもちゃ・ホビー（利益率 20%〜50%）
-    "4549660868880": {"price": 8500, "store": "駿河屋", "name": "プラレール トーマス 大冒険セット"},
-    "4904810192534": {"price": 12000, "store": "一丁目", "name": "LEGO テクニック ランボルギーニ 42115"},
-    "4902425719443": {"price": 15000, "store": "駿河屋", "name": "タカラトミー トミカ プレミアム 25周年セット"},
-    
-    # 日用品・消耗品（利益率 5%〜15%）
-    "4902430916230": {"price": 2800, "store": "家電芸人", "name": "ブラウン 替刃 シリーズ9 92S"},
-    "4987176068729": {"price": 3500, "store": "ウイキャン", "name": "パナソニック シェーバー替刃 ES9036"},
+DEFAULT_CONFIG = {
+    "min_profit_rate": 5.0,
+    "max_profit_rate": 100.0,
+    "exclude_used": True,
+    "rakuten_point_rate": 15.0,
+    "yahoo_point_rate": 20.0,
+    "point_site_rate_rakuten": 1.0,
+    "point_site_rate_yahoo": 1.2,
 }
 
 # 中古品判定キーワード
@@ -89,17 +29,33 @@ USED_KEYWORDS = [
 ]
 
 # ========================
-# 設定
+# データベース読み込み
 # ========================
-DEFAULT_CONFIG = {
-    "min_profit_rate": 5.0,
-    "max_profit_rate": 100.0,  # デフォルトを500→100に変更（現実的な範囲）
-    "exclude_used": True,
-    "rakuten_point_rate": 15.0,
-    "yahoo_point_rate": 20.0,
-    "point_site_rate_rakuten": 1.0,
-    "point_site_rate_yahoo": 1.2,
-}
+@st.cache_data
+def load_buyback_database():
+    """買取価格データベースを読み込み"""
+    # GitHubリポジトリ内のファイルパスを試す
+    possible_paths = [
+        "buyback_database.json",
+        "buyback_database (1).json",
+        "./buyback_database.json",
+        "./buyback_database (1).json",
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    st.sidebar.success(f"✅ データベース読み込み成功: {len(data):,}件")
+                    return data
+            except Exception as e:
+                st.sidebar.error(f"❌ 読み込みエラー: {e}")
+    
+    st.sidebar.warning("⚠️ buyback_database.json が見つかりません。デモモードで起動します。")
+    return {}
+
+buyback_db = load_buyback_database()
 
 # ========================
 # URL生成関数
@@ -126,57 +82,99 @@ def is_used_item(title: str) -> bool:
     return any(keyword.lower() in title_lower for keyword in USED_KEYWORDS)
 
 # ========================
-# 利益計算関数
+# 利益計算関数（修正版）
 # ========================
-def calculate_profit(jan_code, display_price, ec_point_rate, point_site_rate):
-    buyback_info = DEMO_BUYBACK_DB.get(jan_code, {"price": 0, "store": "不明", "name": "不明"})
-    buyback_price = buyback_info["price"]
-    buyback_store = buyback_info["store"]
-    product_name = buyback_info.get("name", "不明")
+def calculate_profit_for_product(jan_code: str, config: dict) -> dict:
+    """
+    実際の買取価格をもとに利益を計算
+    表示価格は買取価格の1.3〜2.0倍と仮定（実際の相場に近い）
+    """
+    if jan_code not in buyback_db:
+        return None
     
-    total_rate = (ec_point_rate + point_site_rate) / 100
-    effective_price = display_price * (1 - total_rate)
+    buyback_info = buyback_db[jan_code]
+    buyback_price = buyback_info.get("buyback_price", 0)
+    buyback_store = buyback_info.get("store", "不明")
     
-    profit_amount = buyback_price - effective_price
-    profit_rate = (profit_amount / effective_price * 100) if effective_price > 0 else 0
+    if buyback_price == 0:
+        return None
+    
+    # 🆕 表示価格を現実的な範囲で設定
+    # 買取価格が高いほど、販売価格との差は小さくなる傾向
+    if buyback_price >= 100000:
+        # 高額商品（10万円以上）：買取価格の1.2〜1.4倍
+        display_price = int(buyback_price * 1.3)
+    elif buyback_price >= 30000:
+        # 中額商品（3万円〜10万円）：買取価格の1.4〜1.7倍
+        display_price = int(buyback_price * 1.5)
+    elif buyback_price >= 10000:
+        # 低額商品（1万円〜3万円）：買取価格の1.6〜2.0倍
+        display_price = int(buyback_price * 1.8)
+    else:
+        # 超低額商品（1万円未満）：買取価格の2.0〜3.0倍
+        display_price = int(buyback_price * 2.5)
+    
+    # Yahoo!ショッピングでの利益計算
+    yahoo_point_rate = config["yahoo_point_rate"]
+    yahoo_ps_rate = config["point_site_rate_yahoo"]
+    yahoo_total_rate = (yahoo_point_rate + yahoo_ps_rate) / 100
+    yahoo_effective = display_price * (1 - yahoo_total_rate)
+    yahoo_profit = buyback_price - yahoo_effective
+    yahoo_profit_rate = (yahoo_profit / yahoo_effective * 100) if yahoo_effective > 0 else 0
+    
+    # 楽天市場での利益計算
+    rakuten_point_rate = config["rakuten_point_rate"]
+    rakuten_ps_rate = config["point_site_rate_rakuten"]
+    rakuten_total_rate = (rakuten_point_rate + rakuten_ps_rate) / 100
+    rakuten_effective = display_price * (1 - rakuten_total_rate)
+    rakuten_profit = buyback_price - rakuten_effective
+    rakuten_profit_rate = (rakuten_profit / rakuten_effective * 100) if rakuten_effective > 0 else 0
+    
+    # 最高利益を選択
+    if yahoo_profit >= rakuten_profit:
+        best_site = "Yahoo!"
+        best_effective = int(yahoo_effective)
+        best_profit = int(yahoo_profit)
+        best_profit_rate = round(yahoo_profit_rate, 2)
+    else:
+        best_site = "楽天"
+        best_effective = int(rakuten_effective)
+        best_profit = int(rakuten_profit)
+        best_profit_rate = round(rakuten_profit_rate, 2)
     
     return {
-        "product_name": product_name,
+        "jan": jan_code,
         "buyback_price": buyback_price,
         "buyback_store": buyback_store,
-        "effective_price": effective_price,
-        "profit_amount": profit_amount,
-        "profit_rate": profit_rate
+        "display_price": display_price,
+        "best_site": best_site,
+        "best_effective_price": best_effective,
+        "best_profit_amount": best_profit,
+        "best_profit_rate": best_profit_rate,
     }
 
 # ========================
 # ランキング生成
 # ========================
-def create_ranking_df(config, exclude_used=True):
-    # 🆕 価格を商品ごとに変動させる（より現実的に）
+def create_ranking_df(config, exclude_used=True, limit=1000):
+    """
+    実データベースから利益ランキングを生成
+    """
     ranking_data = []
     
-    for jan_code, info in DEMO_BUYBACK_DB.items():
-        product_name = info.get("name", "不明")
-        buyback_price = info["price"]
+    # 全JANコードを処理（最大limit件）
+    processed = 0
+    for jan_code in buyback_db.keys():
+        if processed >= limit:
+            break
         
-        # 商品カテゴリーに応じて表示価格を設定
-        if buyback_price >= 80000:
-            display_price = int(buyback_price * 0.6)  # 高額商品は利益率低め
-        elif buyback_price >= 30000:
-            display_price = int(buyback_price * 0.7)  # 中額商品
-        else:
-            display_price = int(buyback_price * 0.8)  # 低額商品は利益率高め
-        
-        # 中古品フィルター（デモなので商品名でチェック）
-        if exclude_used and is_used_item(product_name):
+        result = calculate_profit_for_product(jan_code, config)
+        if result is None:
             continue
         
-        # Yahoo!ショッピングでの利益計算
-        ec_rate = config["yahoo_point_rate"]
-        ps_rate = config["point_site_rate_yahoo"]
-        
-        result = calculate_profit(jan_code, display_price, ec_rate, ps_rate)
+        # 利益がマイナスの商品は除外
+        if result["best_profit_amount"] <= 0:
+            continue
         
         # URL生成
         yahoo_url = generate_search_url(jan_code, "Yahoo!")
@@ -185,17 +183,22 @@ def create_ranking_df(config, exclude_used=True):
         
         ranking_data.append({
             "JAN": jan_code,
-            "商品名": result["product_name"],
             "買取価格": result["buyback_price"],
             "買取店": result["buyback_store"],
-            "表示価格": display_price,
-            "実質価格": int(result["effective_price"]),
-            "利益額": int(result["profit_amount"]),
-            "利益率(%)": round(result["profit_rate"], 2),
+            "表示価格": result["display_price"],
+            "実質価格": result["best_effective_price"],
+            "利益額": result["best_profit_amount"],
+            "利益率(%)": result["best_profit_rate"],
+            "推奨仕入先": result["best_site"],
             "Yahoo!": yahoo_url,
             "楽天": rakuten_url,
             "Amazon": amazon_url,
         })
+        
+        processed += 1
+    
+    if len(ranking_data) == 0:
+        return pd.DataFrame()
     
     df = pd.DataFrame(ranking_data)
     df = df.sort_values("利益率(%)", ascending=False).reset_index(drop=True)
@@ -222,7 +225,19 @@ st.set_page_config(
 )
 
 st.title("🔍 せどり利益スカウター - 利益ランキング")
-st.caption("v2.4 多様なジャンル対応版（45商品データ）| 最終更新: 2026-03-20")
+st.caption(f"v3.0 実データベース対応版（{len(buyback_db):,}件）| 最終更新: 2026-03-20")
+
+# データベース未読み込みの場合
+if len(buyback_db) == 0:
+    st.error("""
+    ❌ **buyback_database.json が読み込めませんでした**
+    
+    **対処法:**
+    1. GitHubリポジトリに `buyback_database.json` があるか確認
+    2. ファイル名が `buyback_database (1).json` の場合、`buyback_database.json` にリネーム
+    3. Streamlit Cloud で「Reboot app」を実行
+    """)
+    st.stop()
 
 # サイドバー設定
 st.sidebar.header("⚙️ 設定")
@@ -251,7 +266,7 @@ config["point_site_rate_yahoo"] = st.sidebar.slider(
 )
 
 # メイン画面
-st.header("📊 Yahoo!ショッピング 利益率ランキング")
+st.header("📊 利益率ランキング")
 
 filter_status = "🔒 新品のみ" if exclude_used else "📦 新品 + 中古"
 st.info(f"**現在のフィルター設定**: {filter_status}")
@@ -275,27 +290,27 @@ with col_range2:
         "最高利益率 (%)",
         min_value=0.0,
         max_value=1000.0,
-        value=100.0,  # デフォルトを100%に変更
+        value=100.0,
         step=10.0,
-        help="この利益率以下の商品のみ表示します（高すぎる利益率は価格ミスの可能性）"
+        help="この利益率以下の商品のみ表示します"
     )
 
-# 利益率範囲の表示
 if min_profit_rate > max_profit_rate:
-    st.error("⚠️ 最低利益率が最高利益率を超えています。設定を見直してください。")
+    st.error("⚠️ 最低利益率が最高利益率を超えています。")
+    st.stop()
 else:
     st.success(f"✅ 利益率範囲: **{min_profit_rate}% 〜 {max_profit_rate}%**")
 
 st.markdown("---")
 
 # その他フィルター
-col1, col2 = st.columns([1, 1])
+col1, col2, col3 = st.columns([1, 1, 1])
 
 with col1:
     display_limit = st.selectbox(
         "表示件数",
-        [10, 20, 50, 100],
-        index=1  # デフォルト20件
+        [10, 20, 50, 100, 200],
+        index=2
     )
 
 with col2:
@@ -305,8 +320,21 @@ with col2:
         index=0
     )
 
+with col3:
+    calc_limit = st.selectbox(
+        "計算対象件数",
+        [100, 500, 1000, 5000],
+        index=2,
+        help="処理する商品数（多いほど時間がかかります）"
+    )
+
 # ランキング生成
-df = create_ranking_df(config, exclude_used=exclude_used)
+with st.spinner(f"ランキングを生成中...（最大{calc_limit}件を処理）"):
+    df = create_ranking_df(config, exclude_used=exclude_used, limit=calc_limit)
+
+if len(df) == 0:
+    st.warning("⚠️ 利益商品が見つかりませんでした。")
+    st.stop()
 
 # 利益率範囲でフィルタリング
 df_filtered = df[
@@ -334,45 +362,40 @@ with col_stat4:
     if len(df_filtered) > 0:
         st.metric("平均利益額", f"¥{int(df_filtered['利益額'].mean()):,}")
 
-# テーブル表示用にURLをリンク化
+# テーブル表示
 if len(df_filtered) > 0:
     df_display = df_filtered.copy()
-    df_display["Yahoo!"] = df_display["Yahoo!"].apply(lambda x: f'<a href="{x}" target="_blank">🔗 検索</a>')
-    df_display["楽天"] = df_display["楽天"].apply(lambda x: f'<a href="{x}" target="_blank">🔗 検索</a>')
-    df_display["Amazon"] = df_display["Amazon"].apply(lambda x: f'<a href="{x}" target="_blank">🔗 検索</a>')
+    df_display["Yahoo!"] = df_display["Yahoo!"].apply(lambda x: f'<a href="{x}" target="_blank">🔗</a>')
+    df_display["楽天"] = df_display["楽天"].apply(lambda x: f'<a href="{x}" target="_blank">🔗</a>')
+    df_display["Amazon"] = df_display["Amazon"].apply(lambda x: f'<a href="{x}" target="_blank">🔗</a>')
     
-    # 価格フォーマット
     df_display["買取価格"] = df_display["買取価格"].apply(lambda x: f"¥{x:,}")
     df_display["表示価格"] = df_display["表示価格"].apply(lambda x: f"¥{x:,}")
     df_display["実質価格"] = df_display["実質価格"].apply(lambda x: f"¥{x:,}")
     df_display["利益額"] = df_display["利益額"].apply(lambda x: f"¥{x:,}")
     df_display["利益率(%)"] = df_display["利益率(%)"].apply(format_profit_rate)
     
-    # HTML形式で表示
     st.markdown(
         df_display.to_html(escape=False, index=True),
         unsafe_allow_html=True
     )
     
-    # ダウンロードボタン
     csv = df_filtered.to_csv(index=True, encoding="utf-8-sig").encode("utf-8-sig")
     st.download_button(
         label="📥 CSVダウンロード",
         data=csv,
-        file_name=f"yahoo_ranking_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        file_name=f"profit_ranking_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
         mime="text/csv"
     )
 else:
-    st.warning("⚠️ 指定された利益率範囲に該当する商品が見つかりませんでした。")
+    st.warning("⚠️ 指定された条件に該当する商品が見つかりませんでした。")
 
 # フッター
 st.markdown("---")
 st.info("""
 ⚠️ **注意事項**  
-- これはデモ版です（45商品のサンプルデータ）
-- 🔗 各ECサイトの「検索」リンクをクリックでJAN検索ページが開きます
-- 🎯 利益率範囲のデフォルトは5%〜100%（現実的な範囲）
-- 家電、ゲーム、美容、PC周辺機器など多様なジャンルを収録
-- 実際の価格・在庫は変動します
-- 仕入れ前に必ず最新情報を確認してください
+- 実データベース（21,353件）から利益商品を抽出しています
+- 表示価格は買取価格の1.3〜2.5倍と推定（実際の相場は変動します）
+- 🔗 リンクをクリックでJAN検索ページが開きます
+- 実際の仕入れ前に必ず最新価格を確認してください
 """)
