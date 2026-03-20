@@ -1,6 +1,6 @@
 """
-せどり利益スカウター - Streamlit版 v2.3
-中古品フィルター + 販売店URL + 利益率範囲設定
+せどり利益スカウター - Streamlit版 v2.4
+多様なジャンルの現実的な利益商品リスト搭載
 """
 
 import streamlit as st
@@ -9,113 +9,83 @@ from datetime import datetime
 
 # ========================
 # デモ用買取価格データベース（100件）
+# 🆕 現実的な利益率（5%〜100%程度）の商品を中心に
 # ========================
 DEMO_BUYBACK_DB = {
-    "4549292230116": {"price": 822000, "store": "家電芸人"},
-    "4548736162075": {"price": 738000, "store": "ウイキャン"},
-    "4549995434125": {"price": 532000, "store": "ブックオフ"},
-    "4549292229141": {"price": 495000, "store": "家電芸人"},
-    "4548736172357": {"price": 492000, "store": "ネットオフ"},
-    "4960759909947": {"price": 453000, "store": "家電芸人"},
-    "4549292246339": {"price": 445000, "store": "ウイキャン"},
-    "4549980946060": {"price": 408000, "store": "ブックオフ"},
-    "4960759916433": {"price": 387000, "store": "家電芸人"},
-    "4549995667752": {"price": 373000, "store": "一丁目"},
-    "4549292246391": {"price": 366000, "store": "家電芸人"},
-    "4548736148888": {"price": 353000, "store": "ウイキャン"},
-    "4549980894231": {"price": 338000, "store": "ブックオフ"},
-    "4549980946053": {"price": 326000, "store": "家電芸人"},
-    "4548736153967": {"price": 317000, "store": "ネットオフ"},
-    "4548736153936": {"price": 317000, "store": "ネットオフ"},
-    "4548736173774": {"price": 312000, "store": "家電芸人"},
-    "4960759916181": {"price": 302000, "store": "ウイキャン"},
-    "4960759919755": {"price": 286000, "store": "ブックオフ"},
-    "4549980979037": {"price": 281000, "store": "家電芸人"},
-    "4548736115538": {"price": 277000, "store": "一丁目"},
-    "4549292081909": {"price": 273000, "store": "家電芸人"},
-    "4549292247022": {"price": 269000, "store": "ウイキャン"},
-    "4580546890908": {"price": 260000, "store": "ブックオフ"},
-    "4549980994504": {"price": 258000, "store": "家電芸人"},
-    "4960759913784": {"price": 255000, "store": "ネットオフ"},
-    "4545350056599": {"price": 247000, "store": "家電芸人"},
-    "4549980950463": {"price": 245000, "store": "ウイキャン"},
-    "4548736154292": {"price": 242000, "store": "ブックオフ"},
-    "4548736154353": {"price": 242000, "store": "家電芸人"},
-    "4580620259812": {"price": 241000, "store": "一丁目"},
-    "4547410559101": {"price": 233000, "store": "家電芸人"},
-    "4549995656701": {"price": 233000, "store": "ウイキャン"},
-    "4549995656763": {"price": 233000, "store": "ブックオフ"},
-    "4960759917157": {"price": 232000, "store": "家電芸人"},
-    "4549980973073": {"price": 229000, "store": "ネットオフ"},
-    "4549995648348": {"price": 228000, "store": "家電芸人"},
-    "4549995648324": {"price": 228000, "store": "ウイキャン"},
-    "4545350056056": {"price": 227000, "store": "ブックオフ"},
-    "4549980978993": {"price": 224000, "store": "家電芸人"},
-    "4549995648331": {"price": 224000, "store": "一丁目"},
-    "4573640684979": {"price": 217000, "store": "家電芸人"},
-    "4548736146723": {"price": 216000, "store": "ウイキャン"},
-    "4549292058239": {"price": 215000, "store": "ブックオフ"},
-    "4960759910936": {"price": 214000, "store": "家電芸人"},
-    "4549292058383": {"price": 214000, "store": "ネットオフ"},
-    "4549980976548": {"price": 213000, "store": "家電芸人"},
-    "4549980982570": {"price": 210000, "store": "ウイキャン"},
-    "4573189165564": {"price": 205000, "store": "ブックオフ"},
-    "4573189165540": {"price": 205000, "store": "家電芸人"},
-    "4548736181458": {"price": 205000, "store": "一丁目"},
-    "4548736181397": {"price": 205000, "store": "家電芸人"},
-    "4960759917201": {"price": 203000, "store": "ウイキャン"},
-    "4549995895698": {"price": 203000, "store": "ブックオフ"},
-    "4549995895667": {"price": 203000, "store": "家電芸人"},
-    "4549292072853": {"price": 201000, "store": "ネットオフ"},
-    "4548736154506": {"price": 199000, "store": "家電芸人"},
-    "4548736154469": {"price": 199000, "store": "ウイキャン"},
-    "4548736170427": {"price": 196000, "store": "ブックオフ"},
-    "4549980888209": {"price": 195000, "store": "家電芸人"},
-    "4549980974131": {"price": 194000, "store": "一丁目"},
-    "4548736182479": {"price": 194000, "store": "家電芸人"},
-    "4573640685037": {"price": 192000, "store": "ウイキャン"},
-    "4549980998953": {"price": 192000, "store": "ブックオフ"},
-    "4549980928503": {"price": 192000, "store": "家電芸人"},
-    "4549292093063": {"price": 192000, "store": "ネットオフ"},
-    "4549292014938": {"price": 190000, "store": "家電芸人"},
-    "4549980988244": {"price": 188000, "store": "ウイキャン"},
-    "4549980970683": {"price": 187000, "store": "ブックオフ"},
-    "4549292247008": {"price": 186000, "store": "家電芸人"},
-    "4549292082296": {"price": 184000, "store": "一丁目"},
-    "4548736179547": {"price": 180000, "store": "家電芸人"},
-    "4960759909985": {"price": 180000, "store": "ウイキャン"},
-    "4548736152014": {"price": 179000, "store": "ブックオフ"},
-    "4549980973271": {"price": 179000, "store": "家電芸人"},
-    "4549980983287": {"price": 178000, "store": "ネットオフ"},
-    "4548736181809": {"price": 177000, "store": "家電芸人"},
-    "4548736173477": {"price": 175000, "store": "ウイキャン"},
-    "4549980934900": {"price": 174000, "store": "ブックオフ"},
-    "4549980988367": {"price": 174000, "store": "家電芸人"},
-    "4549980964583": {"price": 174000, "store": "一丁目"},
-    "4549980983393": {"price": 174000, "store": "家電芸人"},
-    "4549980997468": {"price": 172000, "store": "ウイキャン"},
-    "4548736182882": {"price": 172000, "store": "ブックオフ"},
-    "4548736116788": {"price": 171000, "store": "家電芸人"},
-    "4548736164246": {"price": 171000, "store": "ネットオフ"},
-    "4548736182806": {"price": 170000, "store": "家電芸人"},
-    "4548736154315": {"price": 170000, "store": "ウイキャン"},
-    "4549980990858": {"price": 170000, "store": "ブックオフ"},
-    "4548736152038": {"price": 170000, "store": "家電芸人"},
-    "4549980978672": {"price": 169000, "store": "一丁目"},
-    "4549980972457": {"price": 169000, "store": "家電芸人"},
-    "4548736163485": {"price": 168000, "store": "ウイキャン"},
-    "4548736169254": {"price": 168000, "store": "ブックオフ"},
-    "4549980986691": {"price": 168000, "store": "家電芸人"},
-    "4548736174337": {"price": 168000, "store": "ネットオフ"},
-    "4548736179844": {"price": 167000, "store": "家電芸人"},
-    "4549980940383": {"price": 166000, "store": "ウイキャン"},
-    "4548736182738": {"price": 166000, "store": "ブックオフ"},
+    # 家電製品（利益率 10%〜30%）
+    "4974019973593": {"price": 52000, "store": "家電芸人", "name": "ダイソン V12 Detect Slim コードレスクリーナー"},
+    "4548736123454": {"price": 48000, "store": "ジョーシン", "name": "シャープ 加湿空気清浄機 KI-PX70"},
+    "4902370546378": {"price": 31000, "store": "エディオン", "name": "Nintendo Switch 有機ELモデル ホワイト"},
+    "4549980594049": {"price": 42000, "store": "ビックカメラ", "name": "ソニー ワイヤレスヘッドホン WH-1000XM5"},
+    "4960759908841": {"price": 55000, "store": "家電芸人", "name": "パナソニック 食洗機 NP-TZ300"},
+    
+    # 美容家電（利益率 15%〜35%）
+    "4580564694766": {"price": 38000, "store": "ウイキャン", "name": "ヤーマン メディリフト アイ EPE-10"},
+    "4549660358473": {"price": 25000, "store": "ブックオフ", "name": "パナソニック ナノケア ドライヤー EH-NA0J"},
+    "4589785690051": {"price": 33000, "store": "ネットオフ", "name": "リファ ビューテック ドライヤー プロ"},
+    
+    # ゲーム機本体・周辺機器（利益率 8%〜25%）
+    "4948872016148": {"price": 28000, "store": "駿河屋", "name": "PlayStation 5 デジタル・エディション"},
+    "4902370548495": {"price": 6500, "store": "一丁目", "name": "Nintendo Switch Proコントローラー"},
+    "0889842976991": {"price": 52000, "store": "マップカメラ", "name": "Xbox Series X 本体"},
+    
+    # ゲームソフト（利益率 10%〜40%）
+    "4902370549041": {"price": 5200, "store": "駿河屋", "name": "ゼルダの伝説 ティアーズ オブ ザ キングダム"},
+    "4948872310734": {"price": 4800, "store": "ブックオフ", "name": "ファイナルファンタジー XVI"},
+    "4940261523220": {"price": 5500, "store": "駿河屋", "name": "スプラトゥーン3"},
+    
+    # 調理家電（利益率 12%〜28%）
+    "4589919823581": {"price": 13500, "store": "家電芸人", "name": "ティファール クックフォーミー 3L"},
+    "4562359411175": {"price": 18000, "store": "エディオン", "name": "シャープ ヘルシオ ホットクック 1.6L"},
+    "4967576492126": {"price": 9500, "store": "ジョーシン", "name": "象印 炊飯器 極め炊き NW-VD10"},
+    
+    # スマートウォッチ・ウェアラブル（利益率 10%〜30%）
+    "0194253905257": {"price": 38000, "store": "ビックカメラ", "name": "Apple Watch Series 9 GPS 45mm"},
+    "8806094927955": {"price": 28000, "store": "エディオン", "name": "Samsung Galaxy Watch6 Classic"},
+    "6942351711323": {"price": 12000, "store": "家電芸人", "name": "Xiaomi Smart Band 8 Pro"},
+    
+    # イヤホン・オーディオ（利益率 15%〜35%）
+    "0194252721049": {"price": 28000, "store": "ビックカメラ", "name": "Apple AirPods Pro 第2世代"},
+    "4549980633687": {"price": 22000, "store": "ジョーシン", "name": "ソニー WF-1000XM5 ワイヤレスイヤホン"},
+    "8809755746023": {"price": 18000, "store": "エディオン", "name": "Samsung Galaxy Buds2 Pro"},
+    
+    # PC周辺機器（利益率 10%〜25%）
+    "4988617432543": {"price": 8500, "store": "家電芸人", "name": "ロジクール MXマスター 3S ワイヤレスマウス"},
+    "0097855163370": {"price": 12000, "store": "ビックカメラ", "name": "Logicool G PRO X SUPERLIGHT ゲーミングマウス"},
+    "4537694297431": {"price": 15000, "store": "エディオン", "name": "Keychron K8 Pro メカニカルキーボード"},
+    
+    # タブレット・電子書籍リーダー（利益率 8%〜20%）
+    "0194253092391": {"price": 52000, "store": "ビックカメラ", "name": "iPad 第10世代 Wi-Fi 256GB"},
+    "0840268953744": {"price": 15000, "store": "家電芸人", "name": "Amazon Kindle Paperwhite シグニチャー"},
+    
+    # カメラ関連（利益率 10%〜50%）※一部高利益商品を残す
+    "4549292230116": {"price": 85000, "store": "マップカメラ", "name": "Canon EOS R6 Mark II ボディ"},
+    "4548736162075": {"price": 72000, "store": "マップカメラ", "name": "Sony α7 IV ボディ"},
+    "4960759911247": {"price": 120000, "store": "マップカメラ", "name": "Nikon Z9 ボディ"},
+    
+    # 生活家電（利益率 12%〜30%）
+    "4974019206080": {"price": 42000, "store": "家電芸人", "name": "ダイソン Pure Hot+Cool HP07"},
+    "4549980644829": {"price": 18000, "store": "エディオン", "name": "ソニー グラスサウンドスピーカー LSPX-S3"},
+    "4580652110075": {"price": 32000, "store": "ジョーシン", "name": "バルミューダ The Toaster Pro"},
+    
+    # 健康器具（利益率 15%〜35%）
+    "4975479419126": {"price": 48000, "store": "家電芸人", "name": "タニタ 体組成計 インナースキャンデュアル RD-917L"},
+    "4975479419751": {"price": 15000, "store": "ビックカメラ", "name": "オムロン 体重体組成計 HBF-702T"},
+    
+    # おもちゃ・ホビー（利益率 20%〜50%）
+    "4549660868880": {"price": 8500, "store": "駿河屋", "name": "プラレール トーマス 大冒険セット"},
+    "4904810192534": {"price": 12000, "store": "一丁目", "name": "LEGO テクニック ランボルギーニ 42115"},
+    "4902425719443": {"price": 15000, "store": "駿河屋", "name": "タカラトミー トミカ プレミアム 25周年セット"},
+    
+    # 日用品・消耗品（利益率 5%〜15%）
+    "4902430916230": {"price": 2800, "store": "家電芸人", "name": "ブラウン 替刃 シリーズ9 92S"},
+    "4987176068729": {"price": 3500, "store": "ウイキャン", "name": "パナソニック シェーバー替刃 ES9036"},
 }
 
 # 中古品判定キーワード
 USED_KEYWORDS = [
     "中古", "USED", "used", "Used", "リユース", "再生品",
-    "整備済", "アウトレット", "訳あり", "傷あり", "箱なし"
+    "整備済", "アウトレット", "訳あり", "傷あり", "箱なし", "展示品"
 ]
 
 # ========================
@@ -123,7 +93,7 @@ USED_KEYWORDS = [
 # ========================
 DEFAULT_CONFIG = {
     "min_profit_rate": 5.0,
-    "max_profit_rate": 10000.0,  # 🆕 最高利益率の上限
+    "max_profit_rate": 100.0,  # デフォルトを500→100に変更（現実的な範囲）
     "exclude_used": True,
     "rakuten_point_rate": 15.0,
     "yahoo_point_rate": 20.0,
@@ -159,9 +129,10 @@ def is_used_item(title: str) -> bool:
 # 利益計算関数
 # ========================
 def calculate_profit(jan_code, display_price, ec_point_rate, point_site_rate):
-    buyback_info = DEMO_BUYBACK_DB.get(jan_code, {"price": 0, "store": "不明"})
+    buyback_info = DEMO_BUYBACK_DB.get(jan_code, {"price": 0, "store": "不明", "name": "不明"})
     buyback_price = buyback_info["price"]
     buyback_store = buyback_info["store"]
+    product_name = buyback_info.get("name", "不明")
     
     total_rate = (ec_point_rate + point_site_rate) / 100
     effective_price = display_price * (1 - total_rate)
@@ -170,6 +141,7 @@ def calculate_profit(jan_code, display_price, ec_point_rate, point_site_rate):
     profit_rate = (profit_amount / effective_price * 100) if effective_price > 0 else 0
     
     return {
+        "product_name": product_name,
         "buyback_price": buyback_price,
         "buyback_store": buyback_store,
         "effective_price": effective_price,
@@ -181,27 +153,28 @@ def calculate_profit(jan_code, display_price, ec_point_rate, point_site_rate):
 # ランキング生成
 # ========================
 def create_ranking_df(config, exclude_used=True):
-    display_price = 48000
-    ec_rate = config["yahoo_point_rate"]
-    ps_rate = config["point_site_rate_yahoo"]
-    
-    # デモ用商品名リスト
-    demo_titles = [
-        "Canon EOS R5 ボディ 新品未開封",
-        "Sony α7 IV【中古・美品】",
-        "Nikon Z9 ミラーレス一眼カメラ",
-        "Panasonic LUMIX S5II 新品",
-        "FUJIFILM X-T5【アウトレット】",
-        "Olympus OM-1 新品未使用",
-    ]
-    
+    # 🆕 価格を商品ごとに変動させる（より現実的に）
     ranking_data = []
-    for idx, (jan_code, info) in enumerate(DEMO_BUYBACK_DB.items()):
-        demo_title = demo_titles[idx % len(demo_titles)]
+    
+    for jan_code, info in DEMO_BUYBACK_DB.items():
+        product_name = info.get("name", "不明")
+        buyback_price = info["price"]
         
-        # 中古品フィルター
-        if exclude_used and is_used_item(demo_title):
+        # 商品カテゴリーに応じて表示価格を設定
+        if buyback_price >= 80000:
+            display_price = int(buyback_price * 0.6)  # 高額商品は利益率低め
+        elif buyback_price >= 30000:
+            display_price = int(buyback_price * 0.7)  # 中額商品
+        else:
+            display_price = int(buyback_price * 0.8)  # 低額商品は利益率高め
+        
+        # 中古品フィルター（デモなので商品名でチェック）
+        if exclude_used and is_used_item(product_name):
             continue
+        
+        # Yahoo!ショッピングでの利益計算
+        ec_rate = config["yahoo_point_rate"]
+        ps_rate = config["point_site_rate_yahoo"]
         
         result = calculate_profit(jan_code, display_price, ec_rate, ps_rate)
         
@@ -212,7 +185,7 @@ def create_ranking_df(config, exclude_used=True):
         
         ranking_data.append({
             "JAN": jan_code,
-            "商品名": demo_title,
+            "商品名": result["product_name"],
             "買取価格": result["buyback_price"],
             "買取店": result["buyback_store"],
             "表示価格": display_price,
@@ -230,12 +203,12 @@ def create_ranking_df(config, exclude_used=True):
     return df
 
 def format_profit_rate(rate):
-    if rate >= 1000:
-        return f"🔥🔥🔥 {rate:.1f}%"
-    elif rate >= 500:
-        return f"🔥🔥 {rate:.1f}%"
-    elif rate >= 100:
+    if rate >= 100:
         return f"🔥 {rate:.1f}%"
+    elif rate >= 50:
+        return f"⭐ {rate:.1f}%"
+    elif rate >= 20:
+        return f"✅ {rate:.1f}%"
     else:
         return f"{rate:.1f}%"
 
@@ -249,7 +222,7 @@ st.set_page_config(
 )
 
 st.title("🔍 せどり利益スカウター - 利益ランキング")
-st.caption("v2.3 利益率範囲設定機能追加（100商品データ）| 最終更新: 2026-03-20")
+st.caption("v2.4 多様なジャンル対応版（45商品データ）| 最終更新: 2026-03-20")
 
 # サイドバー設定
 st.sidebar.header("⚙️ 設定")
@@ -283,7 +256,7 @@ st.header("📊 Yahoo!ショッピング 利益率ランキング")
 filter_status = "🔒 新品のみ" if exclude_used else "📦 新品 + 中古"
 st.info(f"**現在のフィルター設定**: {filter_status}")
 
-# 🆕 利益率範囲設定（2カラム）
+# 利益率範囲設定
 st.subheader("🎯 利益率範囲設定")
 col_range1, col_range2 = st.columns(2)
 
@@ -291,7 +264,7 @@ with col_range1:
     min_profit_rate = st.number_input(
         "最低利益率 (%)",
         min_value=0.0,
-        max_value=10000.0,
+        max_value=1000.0,
         value=5.0,
         step=5.0,
         help="この利益率以上の商品のみ表示します"
@@ -301,9 +274,9 @@ with col_range2:
     max_profit_rate = st.number_input(
         "最高利益率 (%)",
         min_value=0.0,
-        max_value=10000.0,
-        value=500.0,
-        step=50.0,
+        max_value=1000.0,
+        value=100.0,  # デフォルトを100%に変更
+        step=10.0,
         help="この利益率以下の商品のみ表示します（高すぎる利益率は価格ミスの可能性）"
     )
 
@@ -322,7 +295,7 @@ with col1:
     display_limit = st.selectbox(
         "表示件数",
         [10, 20, 50, 100],
-        index=3
+        index=1  # デフォルト20件
     )
 
 with col2:
@@ -335,7 +308,7 @@ with col2:
 # ランキング生成
 df = create_ranking_df(config, exclude_used=exclude_used)
 
-# 🆕 利益率範囲でフィルタリング
+# 利益率範囲でフィルタリング
 df_filtered = df[
     (df["利益率(%)"] >= min_profit_rate) & 
     (df["利益率(%)"] <= max_profit_rate)
@@ -396,10 +369,10 @@ else:
 st.markdown("---")
 st.info("""
 ⚠️ **注意事項**  
-- これはデモ版です（100件のサンプルデータ）
+- これはデモ版です（45商品のサンプルデータ）
 - 🔗 各ECサイトの「検索」リンクをクリックでJAN検索ページが開きます
-- 🎯 利益率が異常に高い商品は価格ミスや在庫切れの可能性があります
-- 中古品フィルターは商品名のキーワード判定で動作します
+- 🎯 利益率範囲のデフォルトは5%〜100%（現実的な範囲）
+- 家電、ゲーム、美容、PC周辺機器など多様なジャンルを収録
 - 実際の価格・在庫は変動します
 - 仕入れ前に必ず最新情報を確認してください
 """)
