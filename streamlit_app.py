@@ -1,6 +1,6 @@
 """
-せどり利益スカウター - Streamlit版 v3.1
-実データベース (21,353件) 対応版 - エラー修正版
+せどり利益スカウター - Streamlit版 v3.2
+利益計算ロジック修正版
 """
 
 import streamlit as st
@@ -22,7 +22,6 @@ DEFAULT_CONFIG = {
     "point_site_rate_yahoo": 1.2,
 }
 
-# 中古品判定キーワード
 USED_KEYWORDS = [
     "中古", "USED", "used", "Used", "リユース", "再生品",
     "整備済", "アウトレット", "訳あり", "傷あり", "箱なし", "展示品"
@@ -37,8 +36,6 @@ def load_buyback_database():
     possible_paths = [
         "buyback_database.json",
         "buyback_database (1).json",
-        "./buyback_database.json",
-        "./buyback_database (1).json",
     ]
     
     for path in possible_paths:
@@ -46,15 +43,11 @@ def load_buyback_database():
             try:
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    # データ構造を確認
                     if len(data) > 0:
-                        sample_key = list(data.keys())[0]
-                        sample_value = data[sample_key]
                         st.sidebar.success(f"✅ データベース読み込み成功: {len(data):,}件")
-                        st.sidebar.caption(f"サンプル: {sample_key} → {sample_value}")
                     return data
             except Exception as e:
-                st.sidebar.error(f"❌ 読み込みエラー ({path}): {e}")
+                st.sidebar.error(f"❌ エラー: {e}")
     
     st.sidebar.warning("⚠️ buyback_database.json が見つかりません")
     return {}
@@ -65,87 +58,82 @@ buyback_db = load_buyback_database()
 # URL生成関数
 # ========================
 def generate_search_url(jan_code: str, site: str) -> str:
-    """JANコードから各ECサイトの検索URLを生成"""
     if site == "楽天":
         return f"https://search.rakuten.co.jp/search/mall/{jan_code}/"
     elif site == "Yahoo!":
         return f"https://shopping.yahoo.co.jp/search?p={jan_code}"
     elif site == "Amazon":
         return f"https://www.amazon.co.jp/s?k={jan_code}"
-    else:
-        return ""
+    return ""
 
-# ========================
-# 中古品判定関数
-# ========================
 def is_used_item(title: str) -> bool:
-    """商品タイトルから中古品かどうかを判定"""
     if not title:
         return False
     title_lower = title.lower()
     return any(keyword.lower() in title_lower for keyword in USED_KEYWORDS)
 
 # ========================
-# 利益計算関数（修正版）
+# 🆕 修正版：利益計算関数
 # ========================
 def calculate_profit_for_product(jan_code: str, config: dict) -> dict:
     """
-    実際の買取価格をもとに利益を計算
+    実際の買取価格をもとに利益を計算（修正版）
+    表示価格は「買取価格 ÷ (1 - 還元率) × マージン係数」で計算
     """
     if jan_code not in buyback_db:
         return None
     
     buyback_info = buyback_db[jan_code]
     
-    # 🆕 データ構造の柔軟な対応
     if isinstance(buyback_info, dict):
-        # 辞書形式: {"buyback_price": 800, "store": "ブックオフ"}
         buyback_price = buyback_info.get("buyback_price", 0)
         buyback_store = buyback_info.get("store", "不明")
     elif isinstance(buyback_info, (int, float)):
-        # 数値形式: 800
         buyback_price = buyback_info
         buyback_store = "不明"
     else:
         return None
     
-    if buyback_price == 0:
+    if buyback_price == 0 or buyback_price < 500:
         return None
     
-    # 表示価格を現実的な範囲で設定
-    if buyback_price >= 100000:
-        display_price = int(buyback_price * 1.3)
-    elif buyback_price >= 30000:
-        display_price = int(buyback_price * 1.5)
-    elif buyback_price >= 10000:
-        display_price = int(buyback_price * 1.8)
-    else:
-        display_price = int(buyback_price * 2.5)
-    
-    # Yahoo!ショッピングでの利益計算
+    # 🆕 逆算ロジック：利益率10%を確保する表示価格を計算
     yahoo_point_rate = config["yahoo_point_rate"]
     yahoo_ps_rate = config["point_site_rate_yahoo"]
-    yahoo_total_rate = (yahoo_point_rate + yahoo_ps_rate) / 100
-    yahoo_effective = display_price * (1 - yahoo_total_rate)
+    yahoo_total_rate = (yahoo_point_rate + yahoo_ps_rate) / 100  # 0.212
+    
+    rakuten_point_rate = config["rakuten_point_rate"]
+    rakuten_ps_rate = config["point_site_rate_rakuten"]
+    rakuten_total_rate = (rakuten_point_rate + rakuten_ps_rate) / 100  # 0.16
+    
+    # 🆕 利益率10%を確保する表示価格を計算
+    # 買取価格 = 表示価格 × (1 - 還元率) × (1 - 目標利益率)
+    # → 表示価格 = 買取価格 / ((1 - 還元率) × (1 - 目標利益率))
+    
+    target_profit_margin = 0.10  # 目標利益率10%
+    
+    # Yahoo!での計算
+    yahoo_display_price = int(buyback_price / ((1 - yahoo_total_rate) * (1 - target_profit_margin)))
+    yahoo_effective = yahoo_display_price * (1 - yahoo_total_rate)
     yahoo_profit = buyback_price - yahoo_effective
     yahoo_profit_rate = (yahoo_profit / yahoo_effective * 100) if yahoo_effective > 0 else 0
     
-    # 楽天市場での利益計算
-    rakuten_point_rate = config["rakuten_point_rate"]
-    rakuten_ps_rate = config["point_site_rate_rakuten"]
-    rakuten_total_rate = (rakuten_point_rate + rakuten_ps_rate) / 100
-    rakuten_effective = display_price * (1 - rakuten_total_rate)
+    # 楽天での計算
+    rakuten_display_price = int(buyback_price / ((1 - rakuten_total_rate) * (1 - target_profit_margin)))
+    rakuten_effective = rakuten_display_price * (1 - rakuten_total_rate)
     rakuten_profit = buyback_price - rakuten_effective
     rakuten_profit_rate = (rakuten_profit / rakuten_effective * 100) if rakuten_effective > 0 else 0
     
     # 最高利益を選択
     if yahoo_profit >= rakuten_profit:
         best_site = "Yahoo!"
+        best_display_price = yahoo_display_price
         best_effective = int(yahoo_effective)
         best_profit = int(yahoo_profit)
         best_profit_rate = round(yahoo_profit_rate, 2)
     else:
         best_site = "楽天"
+        best_display_price = rakuten_display_price
         best_effective = int(rakuten_effective)
         best_profit = int(rakuten_profit)
         best_profit_rate = round(rakuten_profit_rate, 2)
@@ -154,7 +142,7 @@ def calculate_profit_for_product(jan_code: str, config: dict) -> dict:
         "jan": jan_code,
         "buyback_price": buyback_price,
         "buyback_store": buyback_store,
-        "display_price": display_price,
+        "display_price": best_display_price,
         "best_site": best_site,
         "best_effective_price": best_effective,
         "best_profit_amount": best_profit,
@@ -165,11 +153,7 @@ def calculate_profit_for_product(jan_code: str, config: dict) -> dict:
 # ランキング生成
 # ========================
 def create_ranking_df(config, exclude_used=True, limit=1000):
-    """
-    実データベースから利益ランキングを生成
-    """
     ranking_data = []
-    
     processed = 0
     errors = 0
     
@@ -179,11 +163,9 @@ def create_ranking_df(config, exclude_used=True, limit=1000):
             if result is None:
                 continue
             
-            # 利益がマイナスの商品は除外
             if result["best_profit_amount"] <= 0:
                 continue
             
-            # URL生成
             yahoo_url = generate_search_url(jan_code, "Yahoo!")
             rakuten_url = generate_search_url(jan_code, "楽天")
             amazon_url = generate_search_url(jan_code, "Amazon")
@@ -206,12 +188,10 @@ def create_ranking_df(config, exclude_used=True, limit=1000):
             
         except Exception as e:
             errors += 1
-            if errors <= 5:  # 最初の5件のエラーのみ表示
-                st.sidebar.warning(f"⚠️ エラー ({jan_code}): {str(e)[:50]}")
             continue
     
     if errors > 0:
-        st.sidebar.info(f"ℹ️ 処理完了: 成功 {processed}件 / エラー {errors}件")
+        st.sidebar.info(f"ℹ️ 処理: 成功 {processed}件 / エラー {errors}件")
     
     if len(ranking_data) == 0:
         return pd.DataFrame()
@@ -241,18 +221,10 @@ st.set_page_config(
 )
 
 st.title("🔍 せどり利益スカウター - 利益ランキング")
-st.caption(f"v3.1 実データベース対応版（{len(buyback_db):,}件）| 最終更新: 2026-03-20")
+st.caption(f"v3.2 利益計算ロジック修正版（{len(buyback_db):,}件）| 最終更新: 2026-03-20")
 
-# データベース未読み込みの場合
 if len(buyback_db) == 0:
-    st.error("""
-    ❌ **buyback_database.json が読み込めませんでした**
-    
-    **対処法:**
-    1. GitHubリポジトリに `buyback_database.json` があるか確認
-    2. Streamlit Cloud で「Manage app」→「Reboot app」を実行
-    3. それでも解決しない場合は、ファイルを再アップロード
-    """)
+    st.error("❌ buyback_database.json が読み込めませんでした")
     st.stop()
 
 # サイドバー設定
@@ -261,8 +233,7 @@ config = DEFAULT_CONFIG.copy()
 
 exclude_used = st.sidebar.checkbox(
     "🔒 中古品を除外",
-    value=DEFAULT_CONFIG["exclude_used"],
-    help="中古品・アウトレット・訳あり商品を自動除外します"
+    value=DEFAULT_CONFIG["exclude_used"]
 )
 
 st.sidebar.markdown("---")
@@ -305,7 +276,7 @@ with col_range2:
         "最高利益率 (%)",
         min_value=0.0,
         max_value=1000.0,
-        value=100.0,
+        value=50.0,  # デフォルトを50%に変更
         step=10.0
     )
 
@@ -317,7 +288,6 @@ else:
 
 st.markdown("---")
 
-# その他フィルター
 col1, col2, col3 = st.columns([1, 1, 1])
 
 with col1:
@@ -338,11 +308,11 @@ with col3:
     calc_limit = st.selectbox(
         "計算対象件数",
         [100, 500, 1000, 5000],
-        index=2
+        index=1  # デフォルト500件
     )
 
 # ランキング生成
-with st.spinner(f"ランキングを生成中...（最大{calc_limit}件を処理）"):
+with st.spinner(f"ランキングを生成中...（{calc_limit}件を処理）"):
     df = create_ranking_df(config, exclude_used=exclude_used, limit=calc_limit)
 
 if len(df) == 0:
@@ -355,7 +325,6 @@ df_filtered = df[
     (df["利益率(%)"] <= max_profit_rate)
 ]
 
-# 並び替え
 if sort_by == "利益額順":
     df_filtered = df_filtered.sort_values("利益額", ascending=False)
 
@@ -407,8 +376,8 @@ else:
 st.markdown("---")
 st.info("""
 ⚠️ **注意事項**  
-- 実データベース（21,353件）から利益商品を抽出
-- 表示価格は買取価格の1.3〜2.5倍と推定（実際の相場は変動）
-- 🔗 リンクをクリックでJAN検索ページが開きます
-- 実際の仕入れ前に必ず最新価格を確認してください
+- 表示価格は「目標利益率10%を確保できる価格」として逆算
+- 実際の販売価格とは異なる場合があります
+- 🔗 リンクをクリックで実際の販売価格を確認してください
+- 仕入れ前に必ず最新価格を確認してください
 """)
