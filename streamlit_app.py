@@ -1,6 +1,6 @@
 """
-せどり利益スカウター - Streamlit版 v2.2
-中古品フィルター + 販売店URL搭載
+せどり利益スカウター - Streamlit版 v2.3
+中古品フィルター + 販売店URL + 利益率範囲設定
 """
 
 import streamlit as st
@@ -123,6 +123,7 @@ USED_KEYWORDS = [
 # ========================
 DEFAULT_CONFIG = {
     "min_profit_rate": 5.0,
+    "max_profit_rate": 10000.0,  # 🆕 最高利益率の上限
     "exclude_used": True,
     "rakuten_point_rate": 15.0,
     "yahoo_point_rate": 20.0,
@@ -248,7 +249,7 @@ st.set_page_config(
 )
 
 st.title("🔍 せどり利益スカウター - 利益ランキング")
-st.caption("v2.2 販売店URL搭載版（100商品データ）| 最終更新: 2026-03-20")
+st.caption("v2.3 利益率範囲設定機能追加（100商品データ）| 最終更新: 2026-03-20")
 
 # サイドバー設定
 st.sidebar.header("⚙️ 設定")
@@ -282,54 +283,114 @@ st.header("📊 Yahoo!ショッピング 利益率ランキング")
 filter_status = "🔒 新品のみ" if exclude_used else "📦 新品 + 中古"
 st.info(f"**現在のフィルター設定**: {filter_status}")
 
-# フィルター
-col1, col2 = st.columns([1, 1])
-with col1:
-    min_rate_filter = st.selectbox(
-        "最低利益率",
-        [5, 10, 20, 50, 100, 200, 500, 1000],
-        index=0
+# 🆕 利益率範囲設定（2カラム）
+st.subheader("🎯 利益率範囲設定")
+col_range1, col_range2 = st.columns(2)
+
+with col_range1:
+    min_profit_rate = st.number_input(
+        "最低利益率 (%)",
+        min_value=0.0,
+        max_value=10000.0,
+        value=5.0,
+        step=5.0,
+        help="この利益率以上の商品のみ表示します"
     )
-with col2:
+
+with col_range2:
+    max_profit_rate = st.number_input(
+        "最高利益率 (%)",
+        min_value=0.0,
+        max_value=10000.0,
+        value=500.0,
+        step=50.0,
+        help="この利益率以下の商品のみ表示します（高すぎる利益率は価格ミスの可能性）"
+    )
+
+# 利益率範囲の表示
+if min_profit_rate > max_profit_rate:
+    st.error("⚠️ 最低利益率が最高利益率を超えています。設定を見直してください。")
+else:
+    st.success(f"✅ 利益率範囲: **{min_profit_rate}% 〜 {max_profit_rate}%**")
+
+st.markdown("---")
+
+# その他フィルター
+col1, col2 = st.columns([1, 1])
+
+with col1:
     display_limit = st.selectbox(
         "表示件数",
         [10, 20, 50, 100],
         index=3
     )
 
+with col2:
+    sort_by = st.selectbox(
+        "並び替え",
+        ["利益率順", "利益額順"],
+        index=0
+    )
+
 # ランキング生成
 df = create_ranking_df(config, exclude_used=exclude_used)
-df_filtered = df[df["利益率(%)"] >= min_rate_filter].head(display_limit)
+
+# 🆕 利益率範囲でフィルタリング
+df_filtered = df[
+    (df["利益率(%)"] >= min_profit_rate) & 
+    (df["利益率(%)"] <= max_profit_rate)
+]
+
+# 並び替え
+if sort_by == "利益額順":
+    df_filtered = df_filtered.sort_values("利益額", ascending=False)
+
+df_filtered = df_filtered.head(display_limit)
 
 # 統計情報
-col_stat1, col_stat2, col_stat3 = st.columns(3)
+col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
 with col_stat1:
-    st.metric("対象商品数", f"{len(df):,}件")
+    st.metric("対象商品数", f"{len(df_filtered):,}件")
 with col_stat2:
-    st.metric("最高利益額", f"¥{df['利益額'].max():,}")
+    if len(df_filtered) > 0:
+        st.metric("最高利益額", f"¥{df_filtered['利益額'].max():,}")
 with col_stat3:
-    st.metric("平均利益率", f"{df['利益率(%)'].mean():.2f}%")
+    if len(df_filtered) > 0:
+        st.metric("平均利益率", f"{df_filtered['利益率(%)'].mean():.2f}%")
+with col_stat4:
+    if len(df_filtered) > 0:
+        st.metric("平均利益額", f"¥{int(df_filtered['利益額'].mean()):,}")
 
 # テーブル表示用にURLをリンク化
-df_display = df_filtered.copy()
-df_display["Yahoo!"] = df_display["Yahoo!"].apply(lambda x: f'<a href="{x}" target="_blank">🔗 検索</a>')
-df_display["楽天"] = df_display["楽天"].apply(lambda x: f'<a href="{x}" target="_blank">🔗 検索</a>')
-df_display["Amazon"] = df_display["Amazon"].apply(lambda x: f'<a href="{x}" target="_blank">🔗 検索</a>')
-
-# HTML形式で表示
-st.markdown(
-    df_display.to_html(escape=False, index=True),
-    unsafe_allow_html=True
-)
-
-# ダウンロードボタン
-csv = df_filtered.to_csv(index=True, encoding="utf-8-sig").encode("utf-8-sig")
-st.download_button(
-    label="📥 CSVダウンロード",
-    data=csv,
-    file_name=f"yahoo_ranking_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-    mime="text/csv"
-)
+if len(df_filtered) > 0:
+    df_display = df_filtered.copy()
+    df_display["Yahoo!"] = df_display["Yahoo!"].apply(lambda x: f'<a href="{x}" target="_blank">🔗 検索</a>')
+    df_display["楽天"] = df_display["楽天"].apply(lambda x: f'<a href="{x}" target="_blank">🔗 検索</a>')
+    df_display["Amazon"] = df_display["Amazon"].apply(lambda x: f'<a href="{x}" target="_blank">🔗 検索</a>')
+    
+    # 価格フォーマット
+    df_display["買取価格"] = df_display["買取価格"].apply(lambda x: f"¥{x:,}")
+    df_display["表示価格"] = df_display["表示価格"].apply(lambda x: f"¥{x:,}")
+    df_display["実質価格"] = df_display["実質価格"].apply(lambda x: f"¥{x:,}")
+    df_display["利益額"] = df_display["利益額"].apply(lambda x: f"¥{x:,}")
+    df_display["利益率(%)"] = df_display["利益率(%)"].apply(format_profit_rate)
+    
+    # HTML形式で表示
+    st.markdown(
+        df_display.to_html(escape=False, index=True),
+        unsafe_allow_html=True
+    )
+    
+    # ダウンロードボタン
+    csv = df_filtered.to_csv(index=True, encoding="utf-8-sig").encode("utf-8-sig")
+    st.download_button(
+        label="📥 CSVダウンロード",
+        data=csv,
+        file_name=f"yahoo_ranking_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv"
+    )
+else:
+    st.warning("⚠️ 指定された利益率範囲に該当する商品が見つかりませんでした。")
 
 # フッター
 st.markdown("---")
@@ -337,6 +398,7 @@ st.info("""
 ⚠️ **注意事項**  
 - これはデモ版です（100件のサンプルデータ）
 - 🔗 各ECサイトの「検索」リンクをクリックでJAN検索ページが開きます
+- 🎯 利益率が異常に高い商品は価格ミスや在庫切れの可能性があります
 - 中古品フィルターは商品名のキーワード判定で動作します
 - 実際の価格・在庫は変動します
 - 仕入れ前に必ず最新情報を確認してください
