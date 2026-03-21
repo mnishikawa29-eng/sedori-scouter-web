@@ -1,15 +1,15 @@
 """
-せどり利益スカウター - Streamlit版 v4.1
-ジャンル別検索 + クーポン相当値引き + 価格.com連携
+せどり利益スカウター - Streamlit版 v4.3
+カテゴリ振り分け修正版 + デバッグ情報表示
 """
-
 import streamlit as st
 import pandas as pd
-import json
 from datetime import datetime
+import json
 import os
-import re
+from collections import Counter
 
+# ==================== 設定 ====================
 DEFAULT_CONFIG = {
     "min_profit_rate": 5.0,
     "max_profit_rate": 100.0,
@@ -18,141 +18,180 @@ DEFAULT_CONFIG = {
     "yahoo_point_rate": 20.0,
     "point_site_rate_rakuten": 1.0,
     "point_site_rate_yahoo": 1.2,
-    "coupon_discount_rate": 0.0,  # 🆕 クーポン相当値引き率（%）
-    "selected_categories": [],     # 🆕 選択カテゴリー
+    "coupon_discount_rate": 0.0,
+    "selected_categories": ["全て"]
+}
+
+# 拡張されたジャンル分類（より広範なプレフィックス）
+CATEGORIES = {
+    "ゲーム機・ソフト": [
+        "4902370",  # Nintendo
+        "4948872",  # Nintendo (別シリーズ)
+        "4976219",  # Sony PlayStation
+        "4549576",  # Microsoft Xbox
+        "4571331",  # ゲームソフト一般
+    ],
+    "家電製品": [
+        "45499",   # 日本製家電（広範囲）
+        "45481",   # 日本製家電
+        "45487",   # 日本製家電
+        "49607",   # Canon/Nikon等
+        "49742",   # 家電メーカー
+    ],
+    "カメラ・レンズ": [
+        "4960759", # Canon
+        "4549292", # Nikon
+        "4549980", # Sony Camera
+        "4548736", # Camera accessories
+        "4960999", # Camera brands
+    ],
+    "美容家電": [
+        "4974019", # Dyson
+        "4904785", # Panasonic美容
+        "4549980", # Sony美容
+    ],
+    "スマートウォッチ": [
+        "0194",    # Apple Watch
+        "4549980", # Sony wearables
+    ],
+    "オーディオ": [
+        "4548736", # Audio brands
+        "4957054", # JVC
+        "4953103", # Sony audio
+        "0194252", # Apple AirPods
+    ],
+    "おもちゃ・ホビー": [
+        "4904810", # Bandai
+        "4573102", # Takara Tomy
+        "4979750", # Konami
+        "4543112", # Square Enix
+    ],
 }
 
 USED_KEYWORDS = [
-    "中古", "USED", "used", "Used", "リユース", "再生品",
-    "整備済", "アウトレット", "訳あり", "傷あり", "箱なし", "展示品"
+    "中古", "USED", "used", "Used", "リユース", "再生品", 
+    "整備済", "アウトレット", "訳あり", "傷あり", "箱なし",
+    "開封品", "展示品", "refurbished"
 ]
 
-# 🆕 ジャンル定義（JANコードの先頭で判定）
-CATEGORIES = {
-    "家電製品": {
-        "prefixes": ["45", "49"],  # 日本製品の標準的なプレフィックス
-        "keywords": ["家電", "電化製品", "appliance"],
-        "description": "家電製品全般（掃除機、空気清浄機、調理家電など）"
-    },
-    "ゲーム機・ソフト": {
-        "prefixes": ["4902370", "4948872", "0889842"],  # Nintendo, Sony, Microsoft
-        "keywords": ["ゲーム", "game", "nintendo", "playstation", "xbox"],
-        "description": "ゲーム機本体・ソフト・周辺機器"
-    },
-    "カメラ・レンズ": {
-        "prefixes": ["4960759", "4549292", "4548736"],  # Nikon, Canon, Sony
-        "keywords": ["カメラ", "レンズ", "camera", "lens"],
-        "description": "一眼カメラ・レンズ・カメラアクセサリー"
-    },
-    "美容家電": {
-        "prefixes": ["4580564", "4549660"],  # ヤーマン、パナソニック美容系
-        "keywords": ["美容", "ドライヤー", "美顔器"],
-        "description": "ドライヤー、美顔器、脱毛器など"
-    },
-    "スマートウォッチ": {
-        "prefixes": ["0194253", "8806094"],  # Apple, Samsung
-        "keywords": ["watch", "ウォッチ", "ウェアラブル"],
-        "description": "Apple Watch、Galaxy Watchなど"
-    },
-    "オーディオ": {
-        "prefixes": ["4549980"],  # Sony
-        "keywords": ["イヤホン", "ヘッドホン", "スピーカー"],
-        "description": "イヤホン、ヘッドホン、スピーカー"
-    },
-    "おもちゃ・ホビー": {
-        "prefixes": ["4549660", "4904810", "4902425"],
-        "keywords": ["おもちゃ", "プラレール", "LEGO"],
-        "description": "おもちゃ、フィギュア、プラモデル"
-    },
-}
+# ==================== 関数 ====================
 
-def is_valid_jan(jan_code: str) -> bool:
-    """有効なJANコードかチェック"""
-    if not isinstance(jan_code, str):
-        return False
-    
-    if not re.match(r'^\d+$', jan_code):
-        return False
-    
-    if len(jan_code) not in [8, 13]:
-        return False
-    
-    if jan_code.startswith('1000000') or jan_code.startswith('9900000'):
-        return False
-    
-    return True
-
-def get_product_category(jan_code: str) -> str:
-    """
-    JANコードからカテゴリーを推定
-    """
-    for category_name, category_info in CATEGORIES.items():
-        for prefix in category_info["prefixes"]:
-            if jan_code.startswith(prefix):
-                return category_name
-    return "その他"
-
-@st.cache_data
 def load_buyback_database():
-    """買取価格データベースを読み込み（有効なJANのみ）"""
-    possible_paths = ["buyback_database.json", "buyback_database (1).json"]
+    """買取価格データベースを読み込む"""
+    possible_paths = [
+        "buyback_database.json",
+        "./buyback_database.json",
+        "../buyback_database.json"
+    ]
     
     for path in possible_paths:
         if os.path.exists(path):
             try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    raw_data = json.load(f)
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
                     
+                    # データ検証
                     valid_data = {}
                     invalid_count = 0
                     
-                    for jan_code, info in raw_data.items():
+                    for jan_code, info in data.items():
                         if is_valid_jan(jan_code):
-                            valid_data[jan_code] = info
+                            if isinstance(info, dict):
+                                valid_data[jan_code] = info
+                            elif isinstance(info, (int, float)):
+                                valid_data[jan_code] = {
+                                    "buyback_price": info,
+                                    "store": "不明",
+                                    "updated_at": ""
+                                }
                         else:
                             invalid_count += 1
                     
-                    st.sidebar.success(f"✅ 有効データ: {len(valid_data):,}件")
+                    st.sidebar.success(f"✅ データ読込: {len(valid_data):,}件")
                     if invalid_count > 0:
-                        st.sidebar.info(f"ℹ️ 除外データ: {invalid_count:,}件")
+                        st.sidebar.warning(f"⚠️ 無効データ除外: {invalid_count}件")
+                    
+                    # デバッグ: JANコードプレフィックス分布を表示
+                    show_jan_prefix_distribution(valid_data)
                     
                     return valid_data
             except Exception as e:
-                st.sidebar.error(f"❌ エラー: {e}")
+                st.sidebar.error(f"❌ データ読込エラー: {e}")
     
+    st.sidebar.error("❌ buyback_database.json が見つかりません")
     return {}
 
-buyback_db = load_buyback_database()
+def show_jan_prefix_distribution(data):
+    """JANコードのプレフィックス分布を表示（デバッグ用）"""
+    prefix_counter = Counter()
+    
+    for jan_code in data.keys():
+        # 最初の4桁をカウント
+        if len(jan_code) >= 4:
+            prefix_counter[jan_code[:4]] += 1
+    
+    # 上位10件を表示
+    st.sidebar.markdown("### 📊 JANプレフィックス分布（上位10）")
+    top_prefixes = prefix_counter.most_common(10)
+    
+    for prefix, count in top_prefixes:
+        category = get_product_category(prefix + "000000000")
+        st.sidebar.text(f"{prefix}***: {count}件 → {category}")
 
-def generate_search_url(jan_code: str, site: str) -> str:
-    if site == "楽天":
-        return f"https://search.rakuten.co.jp/search/mall/{jan_code}/"
-    elif site == "Yahoo!":
-        return f"https://shopping.yahoo.co.jp/search?p={jan_code}"
-    elif site == "Amazon":
-        return f"https://www.amazon.co.jp/s?k={jan_code}"
-    elif site == "価格.com":
-        return f"https://kakaku.com/search_results/{jan_code}/"
-    return ""
+def is_valid_jan(jan_code):
+    """有効なJANコードかチェック"""
+    if not isinstance(jan_code, str):
+        return False
+    if not jan_code.isdigit():
+        return False
+    if len(jan_code) not in [8, 13]:
+        return False
+    # テスト用コード除外
+    if jan_code.startswith(("1000000", "9900000", "0000000")):
+        return False
+    return True
 
-def is_used_item(title: str) -> bool:
+def get_product_category(jan_code):
+    """JANコードからカテゴリを判定（改良版）"""
+    # 完全一致の長いプレフィックスから順にチェック
+    for category, prefixes in CATEGORIES.items():
+        for prefix in prefixes:
+            if jan_code.startswith(prefix):
+                return category
+    
+    # プレフィックスが一致しない場合、最初の2桁で大まかに分類
+    if jan_code.startswith(("45", "49")):
+        return "家電製品"
+    elif jan_code.startswith("0"):
+        return "海外製品"
+    
+    return "その他"
+
+def generate_search_url(jan_code, site):
+    """商品検索URLを生成"""
+    urls = {
+        "楽天": f"https://search.rakuten.co.jp/search/mall/{jan_code}/",
+        "Yahoo!": f"https://shopping.yahoo.co.jp/search?p={jan_code}",
+        "Amazon": f"https://www.amazon.co.jp/s?k={jan_code}",
+        "価格.com": f"https://kakaku.com/search_results/{jan_code}/"
+    }
+    return urls.get(site, "")
+
+def is_used_item(title):
+    """中古品判定"""
     if not title:
         return False
-    return any(kw.lower() in title.lower() for kw in USED_KEYWORDS)
+    return any(keyword in title for keyword in USED_KEYWORDS)
 
-def calculate_profit_for_product(jan_code: str, config: dict) -> dict:
+def calculate_profit_for_product(jan_code, buyback_info, config):
     """
-    利益 = 買取価格 - 実質仕入れ価格
-    実質仕入れ価格 = 表示価格 × (1 - 還元率 - クーポン値引き率)
+    正しい段階的利益計算
+    1. 表示価格設定
+    2. クーポン適用
+    3. ポイント還元適用
+    4. 利益計算
     """
-    if jan_code not in buyback_db:
-        return None
-    
-    if not is_valid_jan(jan_code):
-        return None
-    
-    buyback_info = buyback_db[jan_code]
-    
+    # 買取価格取得
     if isinstance(buyback_info, dict):
         buyback_price = buyback_info.get("buyback_price", 0)
         buyback_store = buyback_info.get("store", "不明")
@@ -162,138 +201,146 @@ def calculate_profit_for_product(jan_code: str, config: dict) -> dict:
     else:
         return None
     
+    # 最低買取価格チェック
     if buyback_price < 3000:
         return None
     
-    # カテゴリー判定
-    category = get_product_category(jan_code)
-    
-    # 表示価格を買取価格の70%〜85%に設定
+    # 表示価格の推定（買取価格の70-85%）
     if buyback_price >= 100000:
-        price_ratio = 0.85
+        display_price = buyback_price * 0.85
     elif buyback_price >= 50000:
-        price_ratio = 0.80
+        display_price = buyback_price * 0.80
     elif buyback_price >= 20000:
-        price_ratio = 0.75
+        display_price = buyback_price * 0.75
     else:
-        price_ratio = 0.70
+        display_price = buyback_price * 0.70
     
-    base_display_price = int(buyback_price * price_ratio)
+    results = {}
     
-    # 🆕 クーポン相当値引き率を追加
-    coupon_discount_rate = config.get("coupon_discount_rate", 0.0) / 100
+    # Yahoo!とRakutenで計算
+    for site_name, point_rate, point_site_rate in [
+        ("Yahoo!", config["yahoo_point_rate"], config["point_site_rate_yahoo"]),
+        ("楽天", config["rakuten_point_rate"], config["point_site_rate_rakuten"])
+    ]:
+        # 1️⃣ クーポン適用後価格
+        coupon_rate = config.get("coupon_discount_rate", 0)
+        post_coupon_price = display_price * (1 - coupon_rate / 100)
+        
+        # 2️⃣ ポイント還元後の実質価格
+        total_point_rate = point_rate + point_site_rate
+        effective_price = post_coupon_price * (1 - total_point_rate / 100)
+        
+        # 3️⃣ 利益計算
+        profit_amount = buyback_price - effective_price
+        profit_rate = (profit_amount / effective_price * 100) if effective_price > 0 else 0
+        
+        results[site_name] = {
+            "display_price": display_price,
+            "post_coupon_price": post_coupon_price,
+            "effective_price": effective_price,
+            "profit_amount": profit_amount,
+            "profit_rate": profit_rate,
+            "coupon_rate": coupon_rate,
+            "point_rate": point_rate,
+            "point_site_rate": point_site_rate
+        }
     
-    # Yahoo!での計算
-    yahoo_point_rate = config["yahoo_point_rate"]
-    yahoo_ps_rate = config["point_site_rate_yahoo"]
-    yahoo_total_rate = (yahoo_point_rate + yahoo_ps_rate) / 100 + coupon_discount_rate
+    # 利益が大きい方を選択
+    best_site = max(results.keys(), key=lambda k: results[k]["profit_amount"])
+    best_result = results[best_site]
     
-    yahoo_display_price = base_display_price
-    yahoo_effective = yahoo_display_price * (1 - yahoo_total_rate)
-    yahoo_profit = buyback_price - yahoo_effective
-    yahoo_profit_rate = (yahoo_profit / yahoo_effective * 100) if yahoo_effective > 0 else 0
-    
-    # 楽天での計算
-    rakuten_point_rate = config["rakuten_point_rate"]
-    rakuten_ps_rate = config["point_site_rate_rakuten"]
-    rakuten_total_rate = (rakuten_point_rate + rakuten_ps_rate) / 100 + coupon_discount_rate
-    
-    rakuten_display_price = base_display_price
-    rakuten_effective = rakuten_display_price * (1 - rakuten_total_rate)
-    rakuten_profit = buyback_price - rakuten_effective
-    rakuten_profit_rate = (rakuten_profit / rakuten_effective * 100) if rakuten_effective > 0 else 0
-    
-    # 最高利益を選択
-    if yahoo_profit >= rakuten_profit:
-        best_site = "Yahoo!"
-        best_display_price = yahoo_display_price
-        best_effective = int(yahoo_effective)
-        best_profit = int(yahoo_profit)
-        best_profit_rate = round(yahoo_profit_rate, 2)
-        best_total_discount = yahoo_total_rate * 100
-    else:
-        best_site = "楽天"
-        best_display_price = rakuten_display_price
-        best_effective = int(rakuten_effective)
-        best_profit = int(rakuten_profit)
-        best_profit_rate = round(rakuten_profit_rate, 2)
-        best_total_discount = rakuten_total_rate * 100
-    
-    if best_profit <= 0:
+    # 利益がマイナスなら除外
+    if best_result["profit_amount"] <= 0:
         return None
     
     return {
-        "jan": jan_code,
-        "category": category,
+        "jan_code": jan_code,
         "buyback_price": buyback_price,
         "buyback_store": buyback_store,
-        "display_price": best_display_price,
-        "total_discount_rate": round(best_total_discount, 2),
         "best_site": best_site,
-        "best_effective_price": best_effective,
-        "best_profit_amount": best_profit,
-        "best_profit_rate": best_profit_rate,
+        "display_price": int(best_result["display_price"]),
+        "post_coupon_price": int(best_result["post_coupon_price"]),
+        "effective_price": int(best_result["effective_price"]),
+        "profit_amount": int(best_result["profit_amount"]),
+        "profit_rate": best_result["profit_rate"],
+        "coupon_rate": best_result["coupon_rate"],
+        "point_rate": best_result["point_rate"],
+        "point_site_rate": best_result["point_site_rate"],
+        "category": get_product_category(jan_code)
     }
 
-def create_ranking_df(config, exclude_used=True, limit=1000):
-    ranking_data = []
-    processed = 0
-    skipped = 0
+def create_ranking_df(buyback_db, config, limit=1000):
+    """ランキングDataFrame作成"""
+    results = []
+    processed_count = 0
+    excluded_count = 0
+    category_counts = Counter()
     
-    # 🆕 カテゴリーフィルター
-    selected_categories = config.get("selected_categories", [])
+    selected_cats = config.get("selected_categories", ["全て"])
     
-    for jan_code in list(buyback_db.keys())[:limit]:
-        try:
-            result = calculate_profit_for_product(jan_code, config)
-            if result is None:
-                skipped += 1
-                continue
-            
-            # 🆕 カテゴリーフィルター適用
-            if selected_categories and result["category"] not in selected_categories:
-                skipped += 1
-                continue
-            
-            yahoo_url = generate_search_url(jan_code, "Yahoo!")
-            rakuten_url = generate_search_url(jan_code, "楽天")
-            amazon_url = generate_search_url(jan_code, "Amazon")
-            kakaku_url = generate_search_url(jan_code, "価格.com")
-            
-            ranking_data.append({
-                "JAN": jan_code,
-                "カテゴリー": result["category"],
-                "買取価格": result["buyback_price"],
-                "買取店": result["buyback_store"],
-                "表示価格": result["display_price"],
-                "総還元率": result["total_discount_rate"],
-                "実質価格": result["best_effective_price"],
-                "利益額": result["best_profit_amount"],
-                "利益率(%)": result["best_profit_rate"],
-                "推奨仕入先": result["best_site"],
-                "Yahoo!": yahoo_url,
-                "楽天": rakuten_url,
-                "Amazon": amazon_url,
-                "価格.com": kakaku_url,
-            })
-            
-            processed += 1
-            
-        except Exception:
-            skipped += 1
+    for jan_code, buyback_info in list(buyback_db.items())[:limit]:
+        processed_count += 1
+        
+        result = calculate_profit_for_product(jan_code, buyback_info, config)
+        
+        if result is None:
+            excluded_count += 1
             continue
+        
+        # カテゴリカウント
+        category_counts[result["category"]] += 1
+        
+        # カテゴリフィルタ
+        if "全て" not in selected_cats:
+            if result["category"] not in selected_cats:
+                excluded_count += 1
+                continue
+        
+        # 利益率フィルタ
+        if not (config["min_profit_rate"] <= result["profit_rate"] <= config["max_profit_rate"]):
+            excluded_count += 1
+            continue
+        
+        results.append(result)
     
-    st.sidebar.info(f"✅ 有効商品: {processed}件 / 除外: {skipped}件")
+    # デバッグ情報表示
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📈 カテゴリ別内訳")
+    for cat, count in category_counts.most_common():
+        st.sidebar.text(f"{cat}: {count}件")
     
-    if len(ranking_data) == 0:
+    st.sidebar.markdown("---")
+    st.sidebar.info(f"📊 処理: {processed_count}件\n除外: {excluded_count}件\n有効: {len(results)}件")
+    
+    if not results:
         return pd.DataFrame()
     
-    df = pd.DataFrame(ranking_data)
-    df = df.sort_values("利益率(%)", ascending=False).reset_index(drop=True)
-    df.index = df.index + 1
-    return df
+    df = pd.DataFrame(results)
+    
+    # 検索リンク追加
+    df["Yahoo!"] = df["jan_code"].apply(lambda x: generate_search_url(x, "Yahoo!"))
+    df["楽天"] = df["jan_code"].apply(lambda x: generate_search_url(x, "楽天"))
+    df["Amazon"] = df["jan_code"].apply(lambda x: generate_search_url(x, "Amazon"))
+    df["価格.com"] = df["jan_code"].apply(lambda x: generate_search_url(x, "価格.com"))
+    
+    # 列名変更
+    df = df.rename(columns={
+        "jan_code": "JANコード",
+        "buyback_price": "買取価格",
+        "buyback_store": "買取店",
+        "best_site": "推奨サイト",
+        "display_price": "表示価格",
+        "post_coupon_price": "クーポン後価格",
+        "effective_price": "実質価格",
+        "profit_amount": "利益額",
+        "profit_rate": "利益率(%)",
+        "category": "カテゴリー"
+    })
+    
+    return df.sort_values("利益率(%)", ascending=False).reset_index(drop=True)
 
 def format_profit_rate(rate):
+    """利益率の装飾"""
     if rate >= 100:
         return f"🔥 {rate:.1f}%"
     elif rate >= 50:
@@ -303,171 +350,182 @@ def format_profit_rate(rate):
     else:
         return f"{rate:.1f}%"
 
-# ========================
-# Streamlit UI
-# ========================
+# ==================== Streamlit UI ====================
+
 st.set_page_config(
     page_title="せどり利益スカウター",
     page_icon="🔍",
     layout="wide"
 )
 
-st.title("🔍 せどり利益スカウター - 利益ランキング")
-st.caption(f"v4.1 ジャンル別検索対応版（{len(buyback_db):,}件）| 最終更新: 2026-03-20")
+st.title("🔍 せどり利益スカウター v4.3")
+st.caption("カテゴリ振り分け修正版 + デバッグ情報表示")
 
-if len(buyback_db) == 0:
-    st.error("❌ buyback_database.json が読み込めませんでした")
+# データ読込
+buyback_db = load_buyback_database()
+
+if not buyback_db:
+    st.error("❌ データベースが読み込めません")
     st.stop()
+
+# ==================== サイドバー設定 ====================
 
 st.sidebar.header("⚙️ 設定")
-config = DEFAULT_CONFIG.copy()
 
-exclude_used = st.sidebar.checkbox("🔒 中古品を除外", value=True)
+# 中古品除外
+st.sidebar.subheader("🔍 フィルター")
+exclude_used = st.sidebar.checkbox("中古品を除外", value=True)
 
-# 🆕 カテゴリー選択
-st.sidebar.markdown("---")
-st.sidebar.subheader("📂 カテゴリー選択")
-
-all_categories = list(CATEGORIES.keys()) + ["その他"]
-config["selected_categories"] = st.sidebar.multiselect(
-    "表示するカテゴリー",
-    options=all_categories,
-    default=[],
-    help="空欄の場合は全カテゴリーを表示"
+# カテゴリ選択
+st.sidebar.subheader("🏷️ ジャンル選択")
+all_categories = ["全て"] + list(CATEGORIES.keys()) + ["その他", "海外製品"]
+selected_categories = st.sidebar.multiselect(
+    "表示するカテゴリ",
+    all_categories,
+    default=["全て"]
 )
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("還元率設定")
+# ポイント還元率
+st.sidebar.subheader("💳 ポイント還元率")
+rakuten_point = st.sidebar.slider("楽天ポイント還元率 (%)", 0.0, 30.0, 15.0, 0.5)
+yahoo_point = st.sidebar.slider("Yahoo!ポイント還元率 (%)", 0.0, 30.0, 20.0, 0.5)
+rakuten_ps = st.sidebar.slider("ポイントサイト還元（楽天）(%)", 0.0, 5.0, 1.0, 0.1)
+yahoo_ps = st.sidebar.slider("ポイントサイト還元（Yahoo!）(%)", 0.0, 5.0, 1.2, 0.1)
 
-config["rakuten_point_rate"] = st.sidebar.slider(
-    "楽天ポイント還元率 (%)", 0.0, 30.0, 15.0, 0.5
-)
-config["yahoo_point_rate"] = st.sidebar.slider(
-    "Yahoo!ポイント還元率 (%)", 0.0, 30.0, 20.0, 0.5
-)
-config["point_site_rate_rakuten"] = st.sidebar.slider(
-    "ポイントサイト還元率（楽天）(%)", 0.0, 5.0, 1.0, 0.1
-)
-config["point_site_rate_yahoo"] = st.sidebar.slider(
-    "ポイントサイト還元率（Yahoo!）(%)", 0.0, 5.0, 1.2, 0.1
-)
-
-# 🆕 クーポン相当値引き率
-st.sidebar.markdown("---")
-st.sidebar.subheader("🎫 クーポン相当値引き")
-
-config["coupon_discount_rate"] = st.sidebar.slider(
-    "追加値引き率 (%)",
-    min_value=0.0,
-    max_value=20.0,
-    value=0.0,
-    step=0.5,
-    help="お買い物マラソンやクーポン配布期間中の想定値引き率"
+# クーポン割引率
+st.sidebar.subheader("🎟️ クーポン相当割引")
+coupon_discount = st.sidebar.slider(
+    "クーポン値引き率 (%)",
+    0.0, 20.0, 0.0, 0.5,
+    help="セール期間中のクーポンによる値引き分を想定"
 )
 
-st.sidebar.caption("""
-**例:**
-- お買い物マラソン: +3〜5%
-- クーポン配布期間: +2〜10%
-""")
+# 設定オブジェクト作成
+config = {
+    "min_profit_rate": 5.0,
+    "max_profit_rate": 100.0,
+    "exclude_used": exclude_used,
+    "rakuten_point_rate": rakuten_point,
+    "yahoo_point_rate": yahoo_point,
+    "point_site_rate_rakuten": rakuten_ps,
+    "point_site_rate_yahoo": yahoo_ps,
+    "coupon_discount_rate": coupon_discount,
+    "selected_categories": selected_categories
+}
+
+# ==================== フィルタ設定 ====================
 
 st.header("📊 利益率ランキング")
-st.info(f"**フィルター**: {'🔒 新品のみ' if exclude_used else '📦 新品 + 中古'}")
 
-st.subheader("🎯 利益率範囲設定")
-col_range1, col_range2 = st.columns(2)
-
-with col_range1:
-    min_profit_rate = st.number_input("最低利益率 (%)", 0.0, 1000.0, 5.0, 5.0)
-
-with col_range2:
-    max_profit_rate = st.number_input("最高利益率 (%)", 0.0, 1000.0, 100.0, 10.0)
-
-if min_profit_rate > max_profit_rate:
-    st.error("⚠️ 最低利益率が最高利益率を超えています。")
-    st.stop()
-
-st.success(f"✅ 利益率範囲: **{min_profit_rate}% 〜 {max_profit_rate}%**")
-st.markdown("---")
-
-col1, col2, col3 = st.columns(3)
-
+col1, col2 = st.columns(2)
 with col1:
-    display_limit = st.selectbox("表示件数", [10, 20, 50, 100, 200], index=2)
-
+    min_rate = st.number_input("最低利益率 (%)", 0.0, 500.0, 5.0, 1.0)
 with col2:
-    sort_by = st.selectbox("並び替え", ["利益率順", "利益額順", "カテゴリー順"], index=0)
+    max_rate = st.number_input("最高利益率 (%)", 0.0, 10000.0, 100.0, 10.0)
 
-with col3:
-    calc_limit = st.selectbox("計算対象件数", [100, 500, 1000, 5000, 10000], index=2)
-
-with st.spinner(f"ランキングを生成中...（{calc_limit}件を処理）"):
-    df = create_ranking_df(config, exclude_used=exclude_used, limit=calc_limit)
-
-if len(df) == 0:
-    st.warning("⚠️ 利益商品が見つかりませんでした。計算対象件数を増やすか、カテゴリーフィルターを解除してください。")
+if min_rate > max_rate:
+    st.error("❌ 最低利益率は最高利益率より小さくしてください")
     st.stop()
 
-df_filtered = df[
-    (df["利益率(%)"] >= min_profit_rate) & 
-    (df["利益率(%)"] <= max_profit_rate)
-]
+config["min_profit_rate"] = min_rate
+config["max_profit_rate"] = max_rate
 
-if sort_by == "利益額順":
-    df_filtered = df_filtered.sort_values("利益額", ascending=False)
-elif sort_by == "カテゴリー順":
-    df_filtered = df_filtered.sort_values(["カテゴリー", "利益率(%)"], ascending=[True, False])
+col3, col4, col5 = st.columns(3)
+with col3:
+    display_limit = st.selectbox("表示件数", [10, 20, 50, 100, "全て"], index=3)
+with col4:
+    sort_by = st.selectbox("並び替え", ["利益率(%)", "利益額", "買取価格"])
+with col5:
+    calc_limit = st.number_input("計算対象件数", 100, 5000, 1000, 100)
 
-df_filtered = df_filtered.head(display_limit)
+# ==================== ランキング生成 ====================
 
-col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
-with col_stat1:
-    st.metric("対象商品数", f"{len(df_filtered):,}件")
-with col_stat2:
-    if len(df_filtered) > 0:
-        st.metric("最高利益額", f"¥{df_filtered['利益額'].max():,}")
-with col_stat3:
-    if len(df_filtered) > 0:
-        st.metric("平均利益率", f"{df_filtered['利益率(%)'].mean():.2f}%")
-with col_stat4:
-    if len(df_filtered) > 0:
-        st.metric("平均利益額", f"¥{int(df_filtered['利益額'].mean()):,}")
+with st.spinner("🔄 利益計算中..."):
+    df = create_ranking_df(buyback_db, config, limit=calc_limit)
 
-if len(df_filtered) > 0:
-    df_display = df_filtered.copy()
-    df_display["Yahoo!"] = df_display["Yahoo!"].apply(lambda x: f'<a href="{x}" target="_blank">🔗</a>')
-    df_display["楽天"] = df_display["楽天"].apply(lambda x: f'<a href="{x}" target="_blank">🔗</a>')
-    df_display["Amazon"] = df_display["Amazon"].apply(lambda x: f'<a href="{x}" target="_blank">🔗</a>')
-    df_display["価格.com"] = df_display["価格.com"].apply(lambda x: f'<a href="{x}" target="_blank">🔗</a>')
-    
-    df_display["買取価格"] = df_display["買取価格"].apply(lambda x: f"¥{x:,}")
-    df_display["表示価格"] = df_display["表示価格"].apply(lambda x: f"¥{x:,}")
-    df_display["総還元率"] = df_display["総還元率"].apply(lambda x: f"{x:.1f}%")
-    df_display["実質価格"] = df_display["実質価格"].apply(lambda x: f"¥{x:,}")
-    df_display["利益額"] = df_display["利益額"].apply(lambda x: f"¥{x:,}")
-    df_display["利益率(%)"] = df_display["利益率(%)"].apply(format_profit_rate)
-    
-    st.markdown(df_display.to_html(escape=False, index=True), unsafe_allow_html=True)
-    
-    csv = df_filtered.to_csv(index=True, encoding="utf-8-sig").encode("utf-8-sig")
-    st.download_button(
-        label="📥 CSVダウンロード",
-        data=csv,
-        file_name=f"profit_ranking_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-        mime="text/csv"
-    )
+if df.empty:
+    st.warning("⚠️ 条件に合う商品が見つかりませんでした")
+    st.info("""
+    **対策**:
+    - 左サイドバーで「カテゴリ別内訳」を確認してください
+    - 最低利益率を下げる
+    - 計算対象件数を増やす
+    - クーポン割引率を上げる
+    - カテゴリを「全て」に変更
+    """)
+    st.stop()
+
+# 並び替え
+df = df.sort_values(sort_by, ascending=False)
+
+# 表示件数制限
+if display_limit != "全て":
+    df_display = df.head(display_limit)
 else:
-    st.warning("⚠️ 該当する商品がありません。")
+    df_display = df
+
+# ==================== 統計表示 ====================
+
+col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+with col_m1:
+    st.metric("🛒 商品数", f"{len(df):,}件")
+with col_m2:
+    st.metric("💰 最高利益", f"¥{df['利益額'].max():,}")
+with col_m3:
+    st.metric("📈 平均利益率", f"{df['利益率(%)'].mean():.1f}%")
+with col_m4:
+    st.metric("💵 平均利益額", f"¥{int(df['利益額'].mean()):,}")
+
+# ==================== テーブル表示 ====================
 
 st.markdown("---")
-st.info("""
-⚠️ **計算ロジック（v4.1）**  
-- 総還元率 = ポイント還元率 + ポイントサイト + クーポン相当値引き率
-- 実質価格 = 表示価格 × (1 - 総還元率)
-- 利益 = 買取価格 - 実質価格
 
-**新機能:**
-- 🆕 ジャンル別検索（7カテゴリー + その他）
-- 🆕 価格.comリンク追加（最安値比較）
-- 🆕 クーポン相当値引き率設定
+# HTML形式でリンク付きテーブル作成
+def make_clickable(url, text="🔗"):
+    return f'<a href="{url}" target="_blank">{text}</a>'
+
+df_html = df_display.copy()
+df_html.index = df_html.index + 1
+df_html["Yahoo!"] = df_html["Yahoo!"].apply(lambda x: make_clickable(x, "Yahoo!"))
+df_html["楽天"] = df_html["楽天"].apply(lambda x: make_clickable(x, "楽天"))
+df_html["Amazon"] = df_html["Amazon"].apply(lambda x: make_clickable(x, "Amazon"))
+df_html["価格.com"] = df_html["価格.com"].apply(lambda x: make_clickable(x, "価格.com"))
+
+# スタイル付きDataFrame
+st.write(df_html.to_html(escape=False, index=True), unsafe_allow_html=True)
+
+# ==================== CSVダウンロード ====================
+
+st.markdown("---")
+
+csv = df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+st.download_button(
+    label="📥 CSVダウンロード",
+    data=csv,
+    file_name=f"sedori_ranking_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+    mime="text/csv"
+)
+
+# ==================== フッター ====================
+
+st.markdown("---")
+st.info(f"""
+### ⚠️ 注意事項
+
+**v4.3 新機能**:
+- ✅ JANコードプレフィックス分布の可視化
+- ✅ カテゴリ別内訳の表示
+- ✅ より広範なプレフィックス対応
+
+**計算方法**:
+1. 表示価格 = 買取価格 × 0.70-0.85（価格帯により変動）
+2. クーポン適用後 = 表示価格 × (1 - クーポン割引率%)
+3. 実質価格 = クーポン適用後 × (1 - (ポイント還元率 + ポイントサイト還元率)%)
+4. 利益 = 買取価格 - 実質価格
+5. 利益率 = (利益 / 実質価格) × 100
+
+**重要**:
+- これはデモ版です（データ: {len(buyback_db):,}件）
+- 実際の価格・在庫は常に変動します
+- 仕入れ前に必ず最新情報を確認してください
 """)
