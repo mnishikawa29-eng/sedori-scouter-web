@@ -102,15 +102,39 @@ def get_api_keys():
     rapidapi_key = st.secrets.get("RAPIDAPI_KEY", "")
     
     with st.sidebar.expander("🔑 API設定", expanded=False):
+        st.markdown("""
+        ### RapidAPI設定ガイド
+        
+        **手順**:
+        1. [RapidAPI Hub](https://rapidapi.com/hub) でアカウント作成
+        2. [Real-Time Product Search API](https://rapidapi.com/letscrape-6bRBa3QguO5/api/real-time-product-search) をサブスクライブ
+        3. **Endpoints** タブ → **Code Snippets** → `X-RapidAPI-Key` の値をコピー
+        4. 下の入力欄に貼り付け
+        
+        **注意**: 無料プランは月100リクエストまで
+        """)
+        
         rapidapi_key_input = st.text_input(
             "RapidAPI Key", 
             value=rapidapi_key,
             type="password",
-            help="Yahoo!ショッピング実価格取得用 (必須)"
+            help="Yahoo!ショッピング実価格取得用 (必須)",
+            placeholder="例: a1b2c3d4e5msh6f7g8h9i0jk1l2m3n4o5p"
         )
         
         if rapidapi_key_input:
             rapidapi_key = rapidapi_key_input
+            
+        # APIキーのテスト機能
+        if rapidapi_key and st.button("🧪 API接続テスト", help="サンプルJANでAPI接続を確認"):
+            with st.spinner("テスト中..."):
+                test_jan = "4902370517392"  # Nintendo Switch Proコントローラー
+                price, status = search_yahoo_shopping_rapidapi(test_jan, rapidapi_key)
+                
+                if price:
+                    st.success(f"✅ API接続成功！\n\nテスト商品（JAN: {test_jan}）\n価格: ¥{price:,}\nステータス: {status}")
+                else:
+                    st.error(f"❌ API接続失敗\n\nステータス: {status}\n\n**トラブルシューティング**:\n- APIキーが正しいか確認\n- サブスクライブ済みか確認\n- 無料プランの上限を超えていないか確認")
     
     return rapidapi_key
 
@@ -153,9 +177,11 @@ def search_yahoo_shopping_rapidapi(jan_code, rapidapi_key=None):
                 return None, "Yahoo!商品なし"
         
         elif response.status_code == 403:
-            return None, "API制限"
+            return None, "API制限 (403: サブスクライブ必要)"
         elif response.status_code == 429:
-            return None, "レート制限"
+            return None, "レート制限 (429: 上限超過)"
+        elif response.status_code == 401:
+            return None, "認証エラー (401: 無効なAPIキー)"
         else:
             return None, f"HTTP {response.status_code}"
     
@@ -164,7 +190,7 @@ def search_yahoo_shopping_rapidapi(jan_code, rapidapi_key=None):
     except requests.exceptions.RequestException as e:
         return None, f"通信エラー"
     except Exception as e:
-        return None, f"不明なエラー"
+        return None, f"不明なエラー: {str(e)}"
 
 # ==================== 利益計算 ====================
 def calculate_profit_yahoo(jan_code, buyback_info, config, yahoo_price=None, api_status="推定"):
@@ -291,23 +317,58 @@ def create_ranking_df(buyback_db, config, selected_category="すべて", limit=5
     
     # 失敗理由の内訳
     if api_fail_reasons:
-        with st.expander("⚠️ API取得失敗の詳細", expanded=False):
+        with st.expander("⚠️ API取得失敗の詳細", expanded=True):
             fail_df = pd.DataFrame(api_fail_reasons.items(), columns=['理由', '件数'])
             fail_df = fail_df.sort_values('件数', ascending=False)
             st.dataframe(fail_df, use_container_width=True)
+            
+            # トラブルシューティング
+            if "API制限 (403: サブスクライブ必要)" in api_fail_reasons:
+                st.error("""
+                **🚨 APIサブスクライブが必要です**
+                
+                下のボタンから RapidAPI にアクセスし、API をサブスクライブしてください。
+                """)
+                st.link_button(
+                    "🔗 RapidAPI でサブスクライブ",
+                    "https://rapidapi.com/letscrape-6bRBa3QguO5/api/real-time-product-search/pricing",
+                    type="primary"
+                )
+            
+            elif "認証エラー (401: 無効なAPIキー)" in api_fail_reasons:
+                st.error("""
+                **🚨 APIキーが無効です**
+                
+                1. 左サイドバーの「🔑 API設定」を開く
+                2. 正しい RapidAPI Key を入力
+                3. 「🧪 API接続テスト」で確認
+                """)
+            
+            elif "レート制限 (429: 上限超過)" in api_fail_reasons:
+                st.warning("""
+                **⚠️ API上限を超えました**
+                
+                無料プランは月100リクエストまでです。
+                有料プランへのアップグレードを検討してください。
+                """)
+                st.link_button(
+                    "🔗 有料プランを確認",
+                    "https://rapidapi.com/letscrape-6bRBa3QguO5/api/real-time-product-search/pricing",
+                    type="secondary"
+                )
     
     return df
 
 # ==================== メインUI ====================
 def main():
     st.set_page_config(
-        page_title="せどり利益スカウター v6.1",
+        page_title="せどり利益スカウター v6.2",
         page_icon="🔍",
         layout="wide"
     )
     
-    st.title("🔍 せどり利益スカウター v6.1")
-    st.caption("Yahoo!ショッピング実価格取得対応版 (GitHub Releases連携)")
+    st.title("🔍 せどり利益スカウター v6.2")
+    st.caption("Yahoo!ショッピング実価格取得対応版 + APIトラブルシューティング強化")
     
     # データベース読み込み
     buyback_db = load_buyback_database()
@@ -332,18 +393,37 @@ def main():
     # APIキー取得
     rapidapi_key = get_api_keys()
     
-    # APIキー警告
+    # APIキー警告（バナー付き）
     if not rapidapi_key:
-        st.warning("""
-        ⚠️ **RapidAPI Key が設定されていません**
+        st.error("""
+        ### 🚨 RapidAPI Key が設定されていません
         
-        Yahoo!ショッピングの実価格を取得するには、左サイドバーの「🔑 API設定」から RapidAPI Key を入力してください。
+        Yahoo!ショッピングの実価格を取得するには、RapidAPI のサブスクライブが必要です。
+        """)
         
-        **RapidAPI Key の取得方法**:
-        1. [RapidAPI](https://rapidapi.com/) にアクセスして登録
-        2. [Real-Time Product Search API](https://rapidapi.com/letscrape-6bRBa3QguO5/api/real-time-product-search) をサブスクライブ
-        3. API Key をコピー
-        4. 左サイドバーに貼り付け
+        col1, col2 = st.columns(2)
+        with col1:
+            st.link_button(
+                "🔗 RapidAPI でアカウント作成",
+                "https://rapidapi.com/auth/sign-up",
+                type="primary",
+                use_container_width=True
+            )
+        with col2:
+            st.link_button(
+                "🔗 Real-Time Product Search API をサブスクライブ",
+                "https://rapidapi.com/letscrape-6bRBa3QguO5/api/real-time-product-search/pricing",
+                type="secondary",
+                use_container_width=True
+            )
+        
+        st.info("""
+        **手順**:
+        1. 上の「アカウント作成」ボタンから RapidAPI に登録
+        2. 「API をサブスクライブ」ボタンから無料プランを選択
+        3. **Endpoints** タブ → **Code Snippets** → `X-RapidAPI-Key` をコピー
+        4. 左サイドバー「🔑 API設定」に貼り付け
+        5. 「🧪 API接続テスト」で動作確認
         """)
     
     # JANプレフィックス分析
@@ -472,10 +552,12 @@ def main():
     # フッター
     st.markdown("---")
     st.info(f"""
-    ### 🔥 v6.1 Yahoo!ショッピング実価格取得対応版
+    ### 🔥 v6.2 Yahoo!ショッピング実価格取得対応版
     
     **✅ 新機能**:
     - Yahoo!ショッピングの実価格を RapidAPI 経由で取得
+    - API接続テスト機能
+    - トラブルシューティングガイド強化
     - カテゴリ別検索対応（カメラ・ゲーム・家電等）
     - JANプレフィックス分布表示
     - API成功率・失敗理由の詳細表示
