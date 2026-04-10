@@ -6,7 +6,8 @@ from datetime import datetime
 import time
 
 # ==================== 設定 ====================
-GITHUB_REPO = "m-nishikawa-gh/sedori-scouter-web"  # ⚠️ ユーザー名を実際の値に変更してください
+GITHUB_REPO = "mnishikawa29-eng/sedori-scouter-web"
+DATABASE_VERSION = "v2026.04.10"  # データベースバージョン (更新時に変更)
 DATABASE_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/buyback_database.json"
 
 DEFAULT_CONFIG = {
@@ -26,8 +27,8 @@ DEFAULT_CONFIG = {
 }
 
 # ==================== データベース読み込み ====================
-@st.cache_data(ttl=3600)  # 1時間キャッシュ
-def load_buyback_database():
+@st.cache_data(ttl=3600, show_spinner=False)  # 1時間キャッシュ
+def load_buyback_database(version=DATABASE_VERSION):
     """GitHub Releases から買取価格データベースをダウンロード"""
     try:
         st.info(f"📥 データベースを読み込んでいます...\n\nURL: `{DATABASE_URL}`")
@@ -44,6 +45,9 @@ def load_buyback_database():
         if prices:
             st.write(f"💰 価格範囲: ¥{min(prices):,} 〜 ¥{max(prices):,}")
             st.write(f"📊 平均価格: ¥{sum(prices)//len(prices):,}")
+        
+        # バージョン情報を追加
+        st.caption(f"📌 データベースバージョン: {version}")
         
         return buyback_db
     
