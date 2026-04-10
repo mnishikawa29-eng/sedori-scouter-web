@@ -6,7 +6,9 @@ from datetime import datetime
 import time
 
 # ==================== 設定 ====================
-# 最終更新: 2026-04-10 (21,491件のデータベース)  
+# 最終更新: 2026-04-10 (21,491件のデータベース) 
+# 最終更新: 2026-04-10 18:00 (21,491件のデータベース)
+# 最終更新: 2026-04-10 19:00 (21,491件のデータベース)
 GITHUB_REPO = "mnishikawa29-eng/sedori-scouter-web"
 DATABASE_VERSION = "v2026.04.10"  # データベースバージョン (更新時に変更)
 DATABASE_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/download/buyback_database.json"
