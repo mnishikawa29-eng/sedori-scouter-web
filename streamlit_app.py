@@ -29,12 +29,11 @@ DEFAULT_CONFIG = {
     "point_site_rate_yahoo": 1.2,
     "coupon_discount_rate": 0.0,
     "selected_categories": ["全て"],
-    # Yahoo!追加還元設定（実購入データベース）
-    "yahoo_line_renkei": True,      # LINE連携 +3%
-    "yahoo_lyp_premium": True,      # LYPプレミアム +2%
-    "yahoo_store_point": True,      # ストアポイント +10%
-    "yahoo_bonus_store": False,     # ボーナスストアPlus +5%
-    "yahoo_campaign": False,        # 超PayPay祭 +4%
+    "yahoo_line_renkei": True,
+    "yahoo_lyp_premium": True,
+    "yahoo_store_point": True,
+    "yahoo_bonus_store": False,
+    "yahoo_campaign": False,
 }
 
 CATEGORIES = {
@@ -253,30 +252,24 @@ def is_used_item(title):
     return any(keyword in title for keyword in USED_KEYWORDS)
 
 def calculate_yahoo_earned_points(price, config):
-    """
-    Yahoo!ショッピング獲得ポイント計算
-    実購入データに基づく正確な計算
-    """
-    # 基本還元率
-    base_rate = 1.5  # PayPayクレジット基本
-    
-    # 追加還元（ユーザー設定）
+    """Yahoo!ショッピング獲得ポイント計算"""
+    base_rate = 1.5
     additional_rate = 0.0
     
     if config.get("yahoo_line_renkei", False):
-        additional_rate += 3.0  # LINE連携
+        additional_rate += 3.0
     
     if config.get("yahoo_lyp_premium", False):
-        additional_rate += 2.0  # LYPプレミアム
+        additional_rate += 2.0
     
     if config.get("yahoo_store_point", False):
-        additional_rate += 10.0  # ストアポイント（ヤマダ電機等）
+        additional_rate += 10.0
     
     if config.get("yahoo_bonus_store", False):
-        additional_rate += 5.0  # ボーナスストアPlus
+        additional_rate += 5.0
     
     if config.get("yahoo_campaign", False):
-        additional_rate += 4.0  # 超PayPay祭等
+        additional_rate += 4.0
     
     total_rate = base_rate + additional_rate
     earned_points = price * (total_rate / 100)
@@ -284,15 +277,7 @@ def calculate_yahoo_earned_points(price, config):
     return int(earned_points), round(total_rate, 1)
 
 def calculate_profit_yahoo_realistic(jan_code, buyback_info, config):
-    """
-    Yahoo!ショッピング実購入データに基づく正確な利益計算
-    
-    実購入例:
-    - 商品価格 ¥64,978
-    - クーポン -¥4,000 → ¥60,978
-    - 獲得ポイント 13,797pt (25.9%)
-    - 実質価格 ¥47,181
-    """
+    """Yahoo!ショッピング実購入データに基づく利益計算"""
     if isinstance(buyback_info, dict):
         buyback_price = buyback_info.get("buyback_price", 0)
         buyback_store = buyback_info.get("store", "不明")
@@ -303,12 +288,10 @@ def calculate_profit_yahoo_realistic(jan_code, buyback_info, config):
     if buyback_price < 3000:
         return None
     
-    # Yahoo!実価格取得
     yahoo_price = None
     if USE_RAPIDAPI and RAPIDAPI_KEY:
         yahoo_price = search_yahoo_shopping_rapidapi(jan_code, RAPIDAPI_KEY)
     
-    # API失敗時は推定
     if not yahoo_price:
         if buyback_price >= 100000:
             yahoo_price = int(buyback_price * 0.85)
@@ -319,19 +302,15 @@ def calculate_profit_yahoo_realistic(jan_code, buyback_info, config):
         else:
             yahoo_price = int(buyback_price * 0.70)
     
-    # 1. クーポン適用後価格
     coupon_rate = config.get("coupon_discount_rate", 0)
     post_coupon_price = yahoo_price * (1 - coupon_rate / 100)
     
-    # 2. 獲得ポイント計算（実購入データベース）
     earned_points, earned_point_rate = calculate_yahoo_earned_points(
         post_coupon_price, config
     )
     
-    # 3. 実質仕入れ価格（獲得ポイント分を差し引く）
     effective_price = post_coupon_price - earned_points
     
-    # 4. 利益計算
     profit_amount = buyback_price - effective_price
     profit_rate = (profit_amount / effective_price * 100) if effective_price > 0 else 0
     
@@ -368,7 +347,6 @@ def calculate_profit_rakuten(jan_code, buyback_info, config):
     if buyback_price < 3000:
         return None
     
-    # 楽天実価格取得
     rakuten_price = None
     if USE_RAKUTEN_API and RAKUTEN_APP_ID:
         rakuten_price = search_rakuten_price(jan_code, RAKUTEN_APP_ID)
@@ -381,11 +359,9 @@ def calculate_profit_rakuten(jan_code, buyback_info, config):
         else:
             rakuten_price = int(buyback_price * 0.75)
     
-    # クーポン適用
     coupon_rate = config.get("coupon_discount_rate", 0)
     post_coupon_price = rakuten_price * (1 - coupon_rate / 100)
     
-    # 楽天ポイント（従来方式）
     total_point_rate = config["rakuten_point_rate"] + config["point_site_rate_rakuten"]
     effective_price = post_coupon_price * (1 - total_point_rate / 100)
     
@@ -402,7 +378,7 @@ def calculate_profit_rakuten(jan_code, buyback_info, config):
         "best_site": "楽天",
         "display_price": int(rakuten_price),
         "post_coupon_price": int(post_coupon_price),
-        "earned_points": 0,  # 楽天は簡易計算
+        "earned_points": 0,
         "earned_point_rate": total_point_rate,
         "effective_price": int(effective_price),
         "profit_amount": int(profit_amount),
@@ -412,21 +388,18 @@ def calculate_profit_rakuten(jan_code, buyback_info, config):
     }
 
 def calculate_profit_best_site(jan_code, buyback_info, config):
-    """Yahoo!と楽天を比較して最適なサイトを選択"""
+    """Yahoo!と楽天を比較"""
     yahoo_result = calculate_profit_yahoo_realistic(jan_code, buyback_info, config)
     rakuten_result = calculate_profit_rakuten(jan_code, buyback_info, config)
     
-    # 両方失敗
     if not yahoo_result and not rakuten_result:
         return None
     
-    # 片方のみ成功
     if not yahoo_result:
         return rakuten_result
     if not rakuten_result:
         return yahoo_result
     
-    # 利益額が大きい方を選択
     if yahoo_result["profit_amount"] >= rakuten_result["profit_amount"]:
         return yahoo_result
     else:
@@ -512,17 +485,6 @@ def create_ranking_df(buyback_db, config, limit=100):
     
     return df.sort_values("利益率(%)", ascending=False).reset_index(drop=True)
 
-def format_profit_rate(rate):
-    """利益率装飾"""
-    if rate >= 100:
-        return f"🔥 {rate:.1f}%"
-    elif rate >= 50:
-        return f"⭐ {rate:.1f}%"
-    elif rate >= 20:
-        return f"✅ {rate:.1f}%"
-    else:
-        return f"{rate:.1f}%"
-
 # ==================== Streamlit UI ====================
 
 st.set_page_config(
@@ -532,9 +494,8 @@ st.set_page_config(
 )
 
 st.title("🔍 せどり利益スカウター v5.3")
-st.caption("✅ Yahoo!実購入データ完全対応版 - 獲得ポイント正確計算")
+st.caption("✅ Yahoo!実購入データ完全対応版")
 
-# API設定状態
 api_status_col1, api_status_col2 = st.columns(2)
 with api_status_col1:
     if RAKUTEN_APP_ID and USE_RAKUTEN_API:
@@ -544,72 +505,47 @@ with api_status_col1:
 
 with api_status_col2:
     if RAPIDAPI_KEY and USE_RAPIDAPI:
-        st.success("✅ RapidAPI 有効（Yahoo!実価格取得可能）")
+        st.success("✅ RapidAPI 有効")
     else:
-        st.error("❌ RapidAPI 未設定（Yahoo!は推定価格）")
+        st.error("❌ RapidAPI 未設定")
 
-# データ読込
 buyback_db = load_buyback_database()
 
 if not buyback_db:
     st.error("❌ データベースが読み込めません")
     st.stop()
 
-# ==================== サイドバー ====================
-
 st.sidebar.header("⚙️ 設定")
 
-# API設定
 with st.sidebar.expander("🔑 API設定", expanded=not RAPIDAPI_KEY):
-    st.markdown("### 🔴 RapidAPI Key（必須）")
-    st.markdown("[取得はこちら](https://rapidapi.com/letscrape-6bRBa3QguO5/api/real-time-product-search)")
-    
-    rapid_key = st.text_input(
-        "RapidAPI Key",
-        value=RAPIDAPI_KEY,
-        type="password",
-        placeholder="1234567890abcdef..."
-    )
-    
+    st.markdown("### RapidAPI Key")
+    rapid_key = st.text_input("RapidAPI Key", value=RAPIDAPI_KEY, type="password")
     if rapid_key:
         RAPIDAPI_KEY = rapid_key
         USE_RAPIDAPI = True
-        st.success("✅ RapidAPI設定完了")
     
-    st.markdown("---")
     st.markdown("### 楽天API")
-    rakuten_id = st.text_input(
-        "楽天アプリID",
-        value=RAKUTEN_APP_ID,
-        type="password"
-    )
+    rakuten_id = st.text_input("楽天アプリID", value=RAKUTEN_APP_ID, type="password")
     if rakuten_id:
         RAKUTEN_APP_ID = rakuten_id
         USE_RAKUTEN_API = True
 
-st.sidebar.subheader("🔍 フィルター")
-exclude_used = st.sidebar.checkbox("中古品を除外", value=True)
-
 st.sidebar.subheader("🏷️ ジャンル選択")
-all_categories = ["全て"] + list(CATEGORIES.keys()) + ["その他", "海外製品"]
+all_categories = ["全て"] + list(CATEGORIES.keys()) + ["その他"]
 selected_categories = st.sidebar.multiselect(
-    "表示するカテゴリ",
+    "カテゴリ",
     all_categories,
     default=["全て"]
 )
 
-# Yahoo!追加還元設定
-st.sidebar.subheader("🎁 Yahoo!追加還元設定")
-st.sidebar.markdown("実購入データに基づく設定")
-
+st.sidebar.subheader("🎁 Yahoo!追加還元")
 yahoo_line = st.sidebar.checkbox("LINE連携（+3%）", value=True)
 yahoo_lyp = st.sidebar.checkbox("LYPプレミアム（+2%）", value=True)
 yahoo_store = st.sidebar.checkbox("ストアポイント（+10%）", value=True)
 yahoo_bonus = st.sidebar.checkbox("ボーナスストアPlus（+5%）", value=False)
 yahoo_campaign = st.sidebar.checkbox("超PayPay祭（+4%）", value=False)
 
-# 合計還元率表示
-total_yahoo_rate = 1.5  # 基本
+total_yahoo_rate = 1.5
 if yahoo_line:
     total_yahoo_rate += 3.0
 if yahoo_lyp:
@@ -621,34 +557,29 @@ if yahoo_bonus:
 if yahoo_campaign:
     total_yahoo_rate += 4.0
 
-st.sidebar.info(f"📊 Yahoo!合計還元率: **{total_yahoo_rate}%**")
+st.sidebar.info(f"📊 Yahoo!合計: **{total_yahoo_rate}%**")
 
-st.sidebar.subheader("💳 楽天ポイント還元率")
-rakuten_point = st.sidebar.slider("楽天ポイント還元率 (%)", 0.0, 30.0, 15.0, 0.5)
-rakuten_ps = st.sidebar.slider("ポイントサイト還元（楽天）(%)", 0.0, 5.0, 1.0, 0.1)
+st.sidebar.subheader("💳 楽天設定")
+rakuten_point = st.sidebar.slider("楽天ポイント (%)", 0.0, 30.0, 15.0, 0.5)
+rakuten_ps = st.sidebar.slider("ポイントサイト（楽天）(%)", 0.0, 5.0, 1.0, 0.1)
 
-st.sidebar.subheader("🎟️ クーポン相当割引")
-coupon_discount = st.sidebar.slider("クーポン値引き率 (%)", 0.0, 20.0, 0.0, 0.5)
+st.sidebar.subheader("🎟️ クーポン")
+coupon_discount = st.sidebar.slider("クーポン割引 (%)", 0.0, 20.0, 0.0, 0.5)
 
 config = {
     "min_profit_rate": 5.0,
     "max_profit_rate": 100.0,
-    "exclude_used": exclude_used,
+    "exclude_used": True,
     "rakuten_point_rate": rakuten_point,
-    "yahoo_point_rate": 20.0,  # 使用しない（実購入ベース計算のため）
     "point_site_rate_rakuten": rakuten_ps,
-    "point_site_rate_yahoo": 1.2,  # 使用しない
     "coupon_discount_rate": coupon_discount,
     "selected_categories": selected_categories,
-    # Yahoo!追加還元
     "yahoo_line_renkei": yahoo_line,
     "yahoo_lyp_premium": yahoo_lyp,
     "yahoo_store_point": yahoo_store,
     "yahoo_bonus_store": yahoo_bonus,
     "yahoo_campaign": yahoo_campaign,
 }
-
-# ==================== フィルタ ====================
 
 st.header("📊 利益率ランキング")
 
@@ -671,25 +602,13 @@ with col3:
 with col4:
     sort_by = st.selectbox("並び替え", ["利益率(%)", "利益額", "買取価格"])
 with col5:
-    if RAPIDAPI_KEY:
-        calc_limit = st.number_input("計算対象件数", 10, 200, 50, 10, 
-                                      help="RapidAPI使用時は50件推奨")
-    else:
-        calc_limit = st.number_input("計算対象件数", 100, 1000, 500, 50)
+    calc_limit = st.number_input("計算対象", 10, 200, 50, 10)
 
-# ==================== ランキング生成 ====================
-
-with st.spinner("🔄 実購入データベースで価格計算中..."):
+with st.spinner("🔄 計算中..."):
     df = create_ranking_df(buyback_db, config, limit=calc_limit)
 
 if df.empty:
     st.warning("⚠️ 条件に合う商品が見つかりませんでした")
-    st.info("""
-    **対策**:
-    - 計算対象件数を増やす
-    - 最低利益率を下げる
-    - カテゴリを「全て」に変更
-    """)
     st.stop()
 
 df = df.sort_values(sort_by, ascending=False)
@@ -698,8 +617,6 @@ if display_limit != "全て":
     df_display = df.head(display_limit)
 else:
     df_display = df
-
-# ==================== 統計 ====================
 
 col_m1, col_m2, col_m3, col_m4 = st.columns(4)
 with col_m1:
@@ -710,9 +627,7 @@ with col_m3:
     st.metric("📈 平均利益率", f"{df['利益率(%)'].mean():.1f}%")
 with col_m4:
     api_count = df["実価格取得"].sum()
-    st.metric("✅ Yahoo!実価格", f"{api_count}件")
-
-# ==================== テーブル ====================
+    st.metric("✅ 実価格", f"{api_count}件")
 
 st.markdown("---")
 
@@ -729,8 +644,6 @@ df_html["実価格取得"] = df_html["実価格取得"].apply(lambda x: "✅" if
 
 st.write(df_html.to_html(escape=False, index=True), unsafe_allow_html=True)
 
-# ==================== CSV ====================
-
 st.markdown("---")
 
 csv = df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
@@ -741,73 +654,46 @@ st.download_button(
     mime="text/csv"
 )
 
-# ==================== デバッグ ====================
-
 st.markdown("---")
-st.header("🧪 デバッグ情報")
+st.header("🧪 デバッグ")
 
-with st.expander("🔍 個別商品の価格取得テスト", expanded=False):
+with st.expander("🔍 テスト", expanded=False):
     test_jans = {
-        "Nintendo Switch 本体": "4902370546378",
+        "Nintendo Switch": "4902370546378",
         "PlayStation 5": "4948872415552",
-        "AirPods Pro": "0194252721049",
-        "Canon EOS R5": "4549292159943",
     }
     
-    selected_product = st.selectbox("テスト商品", list(test_jans.keys()))
+    selected_product = st.selectbox("商品", list(test_jans.keys()))
     test_jan = test_jans[selected_product]
-    st.code(f"JANコード: {test_jan}")
+    st.code(f"JAN: {test_jan}")
     
-    if st.button("🔄 Yahoo!価格を取得"):
-        col1, col2, col3 = st.columns(3)
+    if st.button("🔄 取得"):
+        col1, col2 = st.columns(2)
         
         with col1:
-            with st.spinner("楽天API..."):
-                rakuten_price = search_rakuten_price(test_jan, RAKUTEN_APP_ID)
-                if rakuten_price:
-                    st.success(f"✅ 楽天: ¥{rakuten_price:,}")
-                else:
-                    st.error("❌ 楽天: 取得失敗")
+            rakuten_price = search_rakuten_price(test_jan, RAKUTEN_APP_ID)
+            if rakuten_price:
+                st.success(f"✅ 楽天: ¥{rakuten_price:,}")
+            else:
+                st.error("❌ 楽天失敗")
         
         with col2:
-            with st.spinner("RapidAPI..."):
-                yahoo_price = search_yahoo_shopping_rapidapi(test_jan, RAPIDAPI_KEY)
-                if yahoo_price:
-                    st.success(f"✅ Yahoo!: ¥{yahoo_price:,}")
-                    
-                    # 獲得ポイント計算
-                    earned_pts, earned_rate = calculate_yahoo_earned_points(
-                        yahoo_price, config
-                    )
-                    st.info(f"🎁 獲得: {earned_pts:,}pt ({earned_rate}%)")
-                else:
-                    st.error("❌ Yahoo!: 取得失敗")
-        
-        with col3:
-            if rakuten_price and yahoo_price:
-                diff = ((yahoo_price - rakuten_price) / rakuten_price) * 100
-                st.metric("価格差", f"{abs(diff):.1f}%", 
-                         delta=f"¥{yahoo_price - rakuten_price:,}")
-
-# ==================== フッター ====================
+            yahoo_price = search_yahoo_shopping_rapidapi(test_jan, RAPIDAPI_KEY)
+            if yahoo_price:
+                st.success(f"✅ Yahoo: ¥{yahoo_price:,}")
+                earned_pts, earned_rate = calculate_yahoo_earned_points(yahoo_price, config)
+                st.info(f"🎁 獲得: {earned_pts:,}pt ({earned_rate}%)")
+            else:
+                st.error("❌ Yahoo失敗")
 
 st.markdown("---")
 st.info(f"""
 ### 🔒 v5.3 実購入データ完全対応版
 
 **✅ 新機能**:
-- 獲得ポイント正確計算（実購入データベース）
-- ユーザー設定可能な追加還元
+- 獲得ポイント正確計算
+- Yahoo!追加還元設定
 - 実質価格 = 支払額 - 獲得ポイント
-- 正確な利益率（20%〜35%）
 
-**📊 Yahoo!還元率設定**:
-- 基本: PayPayクレジット 1.5%
-- LINE連携: +3%
-- LYPプレミアム: +2%
-- ストアポイント: +10%（ヤマダ電機等）
-- ボーナスストアPlus: +5%
-- 超PayPay祭: +4%
-
-**💰 計算例**:
-
+**データベース**: {len(buyback_db):,}件
+""")
