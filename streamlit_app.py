@@ -124,25 +124,38 @@ def get_api_keys():
         
         if rapidapi_key_input:
             rapidapi_key = rapidapi_key_input
+        
+        # デバッグモード
+        debug_mode = st.checkbox("🐛 デバッグモード", value=False, 
+                                  help="APIリクエスト・レスポンスの詳細を表示")
             
         # APIキーのテスト機能
         if rapidapi_key and st.button("🧪 API接続テスト", help="サンプルJANでAPI接続を確認"):
             with st.spinner("テスト中..."):
                 test_jan = "4902370517392"  # Nintendo Switch Proコントローラー
-                price, status = search_yahoo_shopping_rapidapi(test_jan, rapidapi_key)
+                price, status, debug_info = search_yahoo_shopping_rapidapi(
+                    test_jan, rapidapi_key, debug=True
+                )
                 
                 if price:
                     st.success(f"✅ API接続成功！\n\nテスト商品（JAN: {test_jan}）\n価格: ¥{price:,}\nステータス: {status}")
                 else:
                     st.error(f"❌ API接続失敗\n\nステータス: {status}\n\n**トラブルシューティング**:\n- APIキーが正しいか確認\n- サブスクライブ済みか確認\n- 無料プランの上限を超えていないか確認")
+                
+                # デバッグ情報表示
+                if debug_info:
+                    with st.expander("🔍 デバッグ情報", expanded=True):
+                        st.json(debug_info)
     
-    return rapidapi_key
+    return rapidapi_key, debug_mode if 'debug_mode' in locals() else False
 
-# ==================== Yahoo!ショッピング価格取得（改善版） ====================
-def search_yahoo_shopping_rapidapi(jan_code, rapidapi_key=None):
-    """RapidAPI経由でYahoo!ショッピング価格を取得（改善版）"""
+# ==================== Yahoo!ショッピング価格取得（デバッグ対応版） ====================
+def search_yahoo_shopping_rapidapi(jan_code, rapidapi_key=None, debug=False):
+    """RapidAPI経由でYahoo!ショッピング価格を取得（デバッグ対応版）"""
+    debug_info = {}
+    
     if not rapidapi_key:
-        return None, "API Key未設定"
+        return None, "API Key未設定", debug_info
     
     try:
         url = "https://real-time-product-search.p.rapidapi.com/search"
@@ -150,18 +163,38 @@ def search_yahoo_shopping_rapidapi(jan_code, rapidapi_key=None):
             "X-RapidAPI-Key": rapidapi_key,
             "X-RapidAPI-Host": "real-time-product-search.p.rapidapi.com"
         }
+        
+        # パラメータ最適化（JANコード検索用）
         params = {
-            "q": jan_code,
+            "q": f'"{jan_code}"',  # ダブルクォートで完全一致検索
             "country": "jp",
             "language": "ja",
             "limit": "30",
             "sort_by": "LOWEST_PRICE"
         }
         
+        # デバッグ情報収集
+        if debug:
+            debug_info["request_url"] = url
+            debug_info["request_headers"] = {k: v if k != "X-RapidAPI-Key" else f"{v[:20]}..." for k, v in headers.items()}
+            debug_info["request_params"] = params
+        
         response = requests.get(url, headers=headers, params=params, timeout=15)
+        
+        # デバッグ情報収集
+        if debug:
+            debug_info["response_status_code"] = response.status_code
+            debug_info["response_headers"] = dict(response.headers)
+            try:
+                debug_info["response_body"] = response.json()
+            except:
+                debug_info["response_body"] = response.text[:500]
         
         if response.status_code == 200:
             data = response.json().get("data", [])
+            
+            if debug:
+                debug_info["total_results"] = len(data)
             
             # Yahoo!ショッピングの商品のみフィルタ
             yahoo_products = [
@@ -169,28 +202,41 @@ def search_yahoo_shopping_rapidapi(jan_code, rapidapi_key=None):
                 if "shopping.yahoo.co.jp" in p.get("product_page_url", "")
             ]
             
+            if debug:
+                debug_info["yahoo_results"] = len(yahoo_products)
+            
             if yahoo_products:
                 # 最安値を取得
                 min_price = min(float(p["offer"]["price"]) for p in yahoo_products)
-                return int(min_price), "成功"
+                return int(min_price), "成功", debug_info
             else:
-                return None, "Yahoo!商品なし"
+                # Yahoo!ショッピング以外の商品があるか確認
+                other_stores = [p.get("product_page_url", "") for p in data[:5]]
+                if debug:
+                    debug_info["other_stores"] = other_stores
+                return None, "Yahoo!商品なし", debug_info
         
         elif response.status_code == 403:
-            return None, "API制限 (403: サブスクライブ必要)"
+            return None, "API制限 (403: サブスクライブ必要)", debug_info
         elif response.status_code == 429:
-            return None, "レート制限 (429: 上限超過)"
+            return None, "レート制限 (429: 上限超過)", debug_info
         elif response.status_code == 401:
-            return None, "認証エラー (401: 無効なAPIキー)"
+            return None, "認証エラー (401: 無効なAPIキー)", debug_info
+        elif response.status_code == 404:
+            return None, "エンドポイント不明 (404: URLまたはパラメータエラー)", debug_info
         else:
-            return None, f"HTTP {response.status_code}"
+            return None, f"HTTP {response.status_code}", debug_info
     
     except requests.exceptions.Timeout:
-        return None, "タイムアウト"
+        return None, "タイムアウト", debug_info
     except requests.exceptions.RequestException as e:
-        return None, f"通信エラー"
+        if debug:
+            debug_info["exception"] = str(e)
+        return None, f"通信エラー", debug_info
     except Exception as e:
-        return None, f"不明なエラー: {str(e)}"
+        if debug:
+            debug_info["exception"] = str(e)
+        return None, f"不明なエラー: {str(e)}", debug_info
 
 # ==================== 利益計算 ====================
 def calculate_profit_yahoo(jan_code, buyback_info, config, yahoo_price=None, api_status="推定"):
@@ -246,7 +292,7 @@ def calculate_profit_yahoo(jan_code, buyback_info, config, yahoo_price=None, api
     }
 
 # ==================== ランキング生成（実API対応版） ====================
-def create_ranking_df(buyback_db, config, selected_category="すべて", limit=50, rapidapi_key=None):
+def create_ranking_df(buyback_db, config, selected_category="すべて", limit=50, rapidapi_key=None, debug=False):
     """利益ランキングを生成（Yahoo!実API対応版）"""
     
     # APIキーチェック
@@ -282,7 +328,7 @@ def create_ranking_df(buyback_db, config, selected_category="すべて", limit=5
         progress_bar.progress((idx + 1) / len(filtered_items))
         
         # Yahoo!価格取得
-        yahoo_price, api_status = search_yahoo_shopping_rapidapi(jan, rapidapi_key)
+        yahoo_price, api_status, _ = search_yahoo_shopping_rapidapi(jan, rapidapi_key, debug=False)
         
         if yahoo_price:
             api_success_count += 1
@@ -323,7 +369,22 @@ def create_ranking_df(buyback_db, config, selected_category="すべて", limit=5
             st.dataframe(fail_df, use_container_width=True)
             
             # トラブルシューティング
-            if "API制限 (403: サブスクライブ必要)" in api_fail_reasons:
+            if "エンドポイント不明 (404: URLまたはパラメータエラー)" in api_fail_reasons:
+                st.error("""
+                **🚨 404 エラー: APIエンドポイントまたはパラメータエラー**
+                
+                **考えられる原因**:
+                1. RapidAPIのエンドポイントURLが変更された
+                2. JANコード検索がサポートされていない
+                3. パラメータの形式が間違っている
+                
+                **対処方法**:
+                1. 左サイドバー「🔑 API設定」→「🐛 デバッグモード」をON
+                2. 「🧪 API接続テスト」を実行
+                3. デバッグ情報のスクリーンショットを開発者に共有
+                """)
+            
+            elif "API制限 (403: サブスクライブ必要)" in api_fail_reasons:
                 st.error("""
                 **🚨 APIサブスクライブが必要です**
                 
@@ -362,13 +423,13 @@ def create_ranking_df(buyback_db, config, selected_category="すべて", limit=5
 # ==================== メインUI ====================
 def main():
     st.set_page_config(
-        page_title="せどり利益スカウター v6.2",
+        page_title="せどり利益スカウター v6.3",
         page_icon="🔍",
         layout="wide"
     )
     
-    st.title("🔍 せどり利益スカウター v6.2")
-    st.caption("Yahoo!ショッピング実価格取得対応版 + APIトラブルシューティング強化")
+    st.title("🔍 せどり利益スカウター v6.3")
+    st.caption("Yahoo!ショッピング実価格取得対応版 + デバッグモード搭載")
     
     # データベース読み込み
     buyback_db = load_buyback_database()
@@ -391,7 +452,7 @@ def main():
     st.caption(f"📌 データベースバージョン: **{DATABASE_VERSION}**")
     
     # APIキー取得
-    rapidapi_key = get_api_keys()
+    rapidapi_key, debug_mode = get_api_keys()
     
     # APIキー警告（バナー付き）
     if not rapidapi_key:
@@ -495,7 +556,8 @@ def main():
                 config,
                 selected_category=selected_category,
                 limit=calc_limit,
-                rapidapi_key=rapidapi_key
+                rapidapi_key=rapidapi_key,
+                debug=debug_mode
             )
         
         if df.empty:
@@ -552,12 +614,14 @@ def main():
     # フッター
     st.markdown("---")
     st.info(f"""
-    ### 🔥 v6.2 Yahoo!ショッピング実価格取得対応版
+    ### 🔥 v6.3 デバッグモード搭載版
     
     **✅ 新機能**:
+    - **🐛 デバッグモード**: API接続の詳細情報を表示（リクエスト・レスポンス全体）
+    - **404エラー対策**: エンドポイント・パラメータの問題を特定
+    - **JANコード検索最適化**: ダブルクォートで完全一致検索
     - Yahoo!ショッピングの実価格を RapidAPI 経由で取得
     - API接続テスト機能
-    - トラブルシューティングガイド強化
     - カテゴリ別検索対応（カメラ・ゲーム・家電等）
     - JANプレフィックス分布表示
     - API成功率・失敗理由の詳細表示
@@ -570,6 +634,12 @@ def main():
     - 50件: 約10秒
     - 100件: 約20秒
     - 500件: 約2分
+    
+    **トラブルシューティング**:
+    1. 左サイドバー「🔑 API設定」を開く
+    2. 「🐛 デバッグモード」をON
+    3. 「🧪 API接続テスト」を実行
+    4. 「デバッグ情報」のスクリーンショットを共有
     """)
 
 if __name__ == "__main__":
